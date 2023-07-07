@@ -5,10 +5,37 @@ edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+[lib]
+crate-type = ["cdylib", "rlib"]
+
 [dependencies]
-winit = "0.28.5"
+winit = "0.28.6"
 env_logger = "0.10.0"
-log = "0.4.17"
-wgpu = "0.16.0"
-egui-wgpu = "0.21.0"
-egui-winit = "0.21.1"
+log = "0.4.19"
+wgpu = "0.16.1"
+eframe = "0.22.0"
+egui-wgpu = "0.22.0"
+png = "0.17.9"
+# cfg-if는 특정 컴파일 설정이 존재하지 않으면 일부 코드를 무시하는 매크로를 제공함
+cfg-if = "1.0.0"
+
+# wasm32 또는 android 환경에선 네이티브 클립보드 사용하지 않기
+[target.'cfg(not(any(target_arch = "wasm32", target_os= "android")))'.dependencies]
+egui-winit = { version = "0.22.0", default-features = false, features = ["clipboard", "links", "accesskit"] }
+
+# 그 이외에는 클립보드 활성화
+[target.'cfg(any(target_arch = "wasm32", target_os= "android"))'.dependencies]
+egui-winit = { version = "0.22.0", default-features = false, features = ["links", "accesskit"] }
+
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+console_error_panic_hook = "0.1.7"
+console_log = "1.0.0"
+wgpu = { version = "0.16.1", features = ["webgl"]}
+wasm-bindgen = "0.2.87"
+wasm-bindgen-futures = "0.4.37"
+web-sys = { version = "0.3.64", features = [
+    "Document",
+    "Window",
+    "Element",
+]}
