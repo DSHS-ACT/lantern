@@ -15,10 +15,15 @@ log = "0.4.19"
 wgpu = "0.16.1"
 eframe = "0.22.0"
 egui-wgpu = "0.22.0"
-png = "0.17.9"
 pollster = "0.3.0"
 # cfg-if는 특정 컴파일 설정이 존재하지 않으면 일부 코드를 무시하는 매크로를 제공함
 cfg-if = "1.0.0"
+
+[dependencies.image]
+version = "0.24.6"
+default-features = false
+features = ["png", "jpeg"]
+
 
 # wasm32 또는 android 환경에선 네이티브 클립보드 사용하지 않기
 [target.'cfg(not(any(target_arch = "wasm32", target_os= "android")))'.dependencies]

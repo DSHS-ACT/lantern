@@ -7,6 +7,7 @@ use winit::window::{Icon, WindowBuilder};
 // wasm32 환경에서만 wasm_bindgen 활용
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
+
 use crate::app::Application;
 
 mod app;
@@ -30,33 +31,15 @@ pub async fn run() {
     // 아이콘 불러오기
     let icon = {
         // 실행 파일에 아이콘 이미지 포함
-        let bytes: &[u8] = include_bytes!("../sun.png");
-        let decoder = png::Decoder::new(bytes);
-        let mut reader = decoder.read_info().unwrap();
+        let bytes = include_bytes!("../sun.png");
+        let image = image::load_from_memory(bytes).unwrap();
+        let width = image.width();
+        let height = image.height();
 
-        let mut rgba = vec![0; reader.output_buffer_size()];
-        let (size, width, height) = {
-            let info = reader.next_frame(&mut rgba).unwrap();
-            (info.buffer_size(), info.width, info.height)
-        };
+        let rgba = image.into_rgba8();
 
-        // 만약 png가 RGBA가 아니라 RGB를 사용한다면, ALPHA값으로 0xFF를 대신 넣어줌
-        let pixels = width * height;
         Icon::from_rgba(
-            if size / pixels as usize == 3 {
-                let mut with_alpha = vec![0u8; (pixels * 4) as usize];
-                rgba.chunks_exact(3)
-                    .zip(with_alpha.chunks_exact_mut(4))
-                    .for_each(|(rgb, rgba)| {
-                        rgba[0] = rgb[0];
-                        rgba[1] = rgb[1];
-                        rgba[2] = rgb[2];
-                        rgba[3] = 0xFF;
-                    });
-                with_alpha
-            } else {
-                rgba
-            },
+            rgba.into_vec(),
             width,
             height,
         )
