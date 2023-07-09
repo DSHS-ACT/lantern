@@ -1,6 +1,5 @@
 use std::iter;
 use cfg_if::cfg_if;
-use eframe::egui;
 use eframe::egui::{ClippedPrimitive, FontData, FontDefinitions, FontFamily, ScrollArea, TextEdit};
 use winit::event::{ElementState, Event, KeyboardInput, VirtualKeyCode, WindowEvent};
 use winit::event_loop::{ControlFlow, EventLoop};
@@ -235,7 +234,7 @@ impl Application {
         let mut dummy = String::from("3489rty9843yur894uf");
         let egui_input = self.egui_state.take_egui_input(&self.window);
         let egui_output = self.egui_context.run(egui_input, |ctx| {
-            egui::SidePanel::right("Side Menu")
+            eframe::egui::SidePanel::right("Side Menu")
                 .resizable(true)
                 .width_range(0.0..=512.0)
                 .default_width(100.0)
@@ -265,7 +264,7 @@ pub async fn run() {
         if #[cfg(target_arch = "wasm32")] {
             // panic 발생시 웹 브라우저의 console.err에 로그 띄우기
             std::panic::set_hook(Box::new(console_error_panic_hook::hook));
-            console_log::init_with_level(log::Level::Debug).expect("로거 초기화 실패");
+            console_log::init_with_level(log::Level::Warn).expect("로거 초기화 실패");
         } else {
             // 아니면 기본적인 로거만 불러오기
             env_logger::init();
@@ -313,6 +312,25 @@ pub async fn run() {
         .with_title("Lantern: Ray Tracer")
         .build(&event_loop)
         .unwrap();
+
+    #[cfg(target_arch = "wasm32")]
+    {
+        // 캔버스 문제 해결
+        use winit::dpi::PhysicalSize;
+        window.set_inner_size(PhysicalSize::new(450, 400));
+
+        use winit::platform::web::WindowExtWebSys;
+        web_sys::window()
+            .and_then(|win| win.document())
+            .and_then(|doc| {
+                let dst = doc.get_element_by_id("wasm-example")?;
+                let canvas = web_sys::Element::from(window.canvas());
+                dst.append_child(&canvas).ok()?;
+                Some(())
+            })
+            .expect("Couldn't append canvas to document body.");
+    }
+
 
     let mut app = Application::new(window, &event_loop).await;
 
