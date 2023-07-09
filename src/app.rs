@@ -1,11 +1,18 @@
 use std::iter;
+use std::mem::size_of;
+use std::time::{SystemTime, UNIX_EPOCH};
 
-use eframe::egui::{ClippedPrimitive, FontData, FontDefinitions, FontFamily, TextEdit};
-use wgpu::{Backends, Color, CommandEncoder, CommandEncoderDescriptor, CompositeAlphaMode, Device, DeviceDescriptor, Dx12Compiler, Features, Instance, InstanceDescriptor, Limits, LoadOp, Operations, PowerPreference, PresentMode, Queue, RenderPassColorAttachment, RenderPassDescriptor, RequestAdapterOptions, Surface, SurfaceConfiguration, SurfaceError, TextureUsages, TextureViewDescriptor};
+use bytemuck::{Pod, Zeroable};
+use eframe::egui::{ClippedPrimitive, FontData, FontDefinitions, FontFamily, Label, Widget};
+use wgpu::{Backends, BindGroup, BindGroupDescriptor, BindGroupEntry, BindGroupLayoutDescriptor, BindGroupLayoutEntry, BindingType, BlendState, Buffer, BufferUsages, Color, ColorTargetState, ColorWrites, CommandEncoder, CommandEncoderDescriptor, CompositeAlphaMode, Device, DeviceDescriptor, Dx12Compiler, Face, Features, FragmentState, FrontFace, include_wgsl, IndexFormat, Instance, InstanceDescriptor, Limits, LoadOp, MultisampleState, Operations, PipelineLayoutDescriptor, PolygonMode, PowerPreference, PresentMode, PrimitiveState, PrimitiveTopology, Queue, RenderPassColorAttachment, RenderPassDescriptor, RenderPipeline, RenderPipelineDescriptor, RequestAdapterOptions, SamplerBindingType, ShaderStages, Surface, SurfaceConfiguration, SurfaceError, TextureSampleType, TextureUsages, TextureViewDescriptor, TextureViewDimension, vertex_attr_array, VertexAttribute, VertexBufferLayout, VertexState};
+use wgpu::BindingResource::{Sampler, TextureView};
+use wgpu::util::{BufferInitDescriptor, DeviceExt};
 use winit::dpi::PhysicalSize;
 use winit::event::WindowEvent;
 use winit::event_loop::EventLoop;
 use winit::window::Window;
+
+use crate::lantern::Lantern;
 
 pub struct Application {
     surface: Surface,
@@ -13,12 +20,18 @@ pub struct Application {
     queue: Queue,
     config: SurfaceConfiguration,
     pub size: PhysicalSize<u32>,
+    main_pipeline: RenderPipeline,
+    vertex_buffer: Buffer,
+    index_buffer: Buffer,
+    blit_bind_group: BindGroup,
     // 무조건 winit의 Window를 쓸 것!
     pub window: Window,
     egui_state: egui_winit::State,
     egui_context: eframe::egui::Context,
     egui_renderer: egui_wgpu::Renderer,
-    egui_screen: egui_wgpu::renderer::ScreenDescriptor
+    egui_screen: egui_wgpu::renderer::ScreenDescriptor,
+    when_last_frame: u128,
+    pub lantern: Lantern
 }
 
 impl Application {
@@ -77,6 +90,8 @@ impl Application {
             .await
             .unwrap();
 
+        let lantern = Lantern::new(&device, size);
+
         // 해당 surface랑 adapter가 가진 기능들의 집합
         let capabilities = surface.get_capabilities(&adapter);
 
@@ -99,6 +114,75 @@ impl Application {
             // 그런거 없으니 빈 벡터 사용.
         };
         surface.configure(&device, &config);
+
+        let shader = device.create_shader_module(include_wgsl!("./shader.wgsl"));
+
+        let vertex_buffer = device.create_buffer_init(&BufferInitDescriptor {
+            label: Some("Vertex Buffer"),
+            contents: bytemuck::cast_slice(VERTICES),
+            usage: BufferUsages::VERTEX,
+        });
+        let index_buffer = device.create_buffer_init(&BufferInitDescriptor {
+            label: Some("Index Buffer"),
+            contents: bytemuck::cast_slice(INDICES),
+            usage: BufferUsages::INDEX
+        });
+
+        let blit_bind_group_layout = device.create_bind_group_layout(&BLIT_BIND_GROUP_LAYOUT);
+        let blit_bind_group = device.create_bind_group(&BindGroupDescriptor {
+            label: Some("Blit Bind Group"),
+            layout: &blit_bind_group_layout,
+            entries: &[
+                BindGroupEntry {
+                    binding: 0,
+                    resource: TextureView(&lantern.final_image.view),
+                },
+                BindGroupEntry {
+                    binding: 1,
+                    resource: Sampler(&lantern.final_image.sampler),
+                }
+            ],
+        });
+
+        let main_pipeline_layout = device.create_pipeline_layout(&PipelineLayoutDescriptor {
+            label: Some("Main Pipeline Layout"),
+            bind_group_layouts: &[&blit_bind_group_layout],
+            push_constant_ranges: &[]
+        });
+        let main_pipeline = device.create_render_pipeline(&RenderPipelineDescriptor {
+            label: Some("Main Pipeline"),
+            layout: Some(&main_pipeline_layout),
+            vertex: VertexState {
+                module: &shader,
+                entry_point: "vs_main",
+                buffers: &[Vertex::layout()]
+            },
+            fragment: Some(FragmentState {
+                module: &shader,
+                entry_point: "fs_main",
+                targets: &[Some(ColorTargetState {
+                    format: config.format,
+                    blend: Some(BlendState::REPLACE),
+                    write_mask: ColorWrites::ALL
+                })],
+            }),
+            primitive: PrimitiveState {
+                topology: PrimitiveTopology::TriangleList,
+                strip_index_format: None,
+                front_face: FrontFace::Ccw,
+                cull_mode: Some(Face::Back),
+                unclipped_depth: false,
+                polygon_mode: PolygonMode::Fill,
+                conservative: false,
+            },
+            depth_stencil: None,
+            multisample: MultisampleState {
+                count: 1,
+                mask: !0,
+                alpha_to_coverage_enabled: false,
+            },
+            multiview: None,
+        });
 
         let egui_state = egui_winit::State::new(event_loop);
         let egui_context = eframe::egui::Context::default();
@@ -138,11 +222,17 @@ impl Application {
             queue,
             config,
             size,
+            main_pipeline,
+            vertex_buffer,
+            index_buffer,
+            blit_bind_group,
             window,
             egui_state,
             egui_context,
             egui_renderer,
             egui_screen,
+            when_last_frame: 0,
+            lantern,
         }
     }
 
@@ -158,9 +248,27 @@ impl Application {
 
         self.egui_screen.pixels_per_point = self.egui_context.pixels_per_point();
         self.egui_screen.size_in_pixels = [self.config.width, self.config.height];
+        self.lantern.resize(&self.device, new_size);
+
+        self.blit_bind_group = self.device.create_bind_group(&BindGroupDescriptor {
+            label: Some("Blit Bind Group"),
+            layout: &self.device.create_bind_group_layout(&BLIT_BIND_GROUP_LAYOUT),
+            entries: &[
+                BindGroupEntry {
+                    binding: 0,
+                    resource: TextureView(&self.lantern.final_image.view),
+                },
+                BindGroupEntry {
+                    binding: 1,
+                    resource: Sampler(&self.lantern.final_image.sampler),
+                }
+            ],
+        });
     }
 
-    pub fn update(&mut self) {}
+    pub fn update(&mut self) {
+        self.lantern.update(&self.queue)
+    }
 
     pub fn render(&mut self) -> Result<(), SurfaceError> {
         let output = self.surface.get_current_texture()?; // 렌더링 결과를 출력할 곳
@@ -206,6 +314,12 @@ impl Application {
                 depth_stencil_attachment: None,
             });
 
+            render_pass.set_pipeline(&self.main_pipeline);
+            render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(0..));
+            render_pass.set_index_buffer(self.index_buffer.slice(0..), IndexFormat::Uint16);
+            render_pass.set_bind_group(0, &self.blit_bind_group, &[]);
+            render_pass.draw_indexed(0..6, 0, 0..1);
+
             self.egui_renderer.render(&mut render_pass, &primitives, &self.egui_screen)
         }
 
@@ -227,15 +341,20 @@ impl Application {
     }
 
     fn update_egui(&mut self, encoder: &mut CommandEncoder) -> Vec<ClippedPrimitive> {
-        let mut dummy = String::from("3489rty9843yur894uf");
         let egui_input = self.egui_state.take_egui_input(&self.window);
         let egui_output = self.egui_context.run(egui_input, |ctx| {
-            eframe::egui::SidePanel::right("Side Menu")
+            eframe::egui::SidePanel::right("렌더 정보")
                 .resizable(true)
                 .width_range(0.0..=512.0)
-                .default_width(100.0)
+                .default_width(120.0)
                 .show(ctx, |ui| {
-                    TextEdit::singleline(&mut dummy).clip_text(false).desired_width(f32::INFINITY).show(ui);
+                    let current = SystemTime::now();
+                    let since_epoch = current.duration_since(UNIX_EPOCH).unwrap();
+
+                    Label::new(format!("프레임 처리 시간: {} ms", (since_epoch.as_millis() - self.when_last_frame)))
+                        .wrap(false)
+                        .ui(ui);
+                    self.when_last_frame = since_epoch.as_millis();
                 });
         });
 
@@ -250,3 +369,65 @@ impl Application {
         primitives
     }
 }
+
+#[repr(C)]
+#[derive(Copy, Clone, Debug, Pod, Zeroable)]
+pub struct Vertex {
+    pub position: [f32; 3],
+    pub tex_coord: [f32; 2],
+}
+
+impl Vertex {
+    const ATTRIBS: [VertexAttribute; 2] = vertex_attr_array![0 => Float32x3, 1 => Float32x2];
+
+    pub fn layout<'a>() -> VertexBufferLayout<'a> {
+        VertexBufferLayout {
+            array_stride: size_of::<Self>() as wgpu::BufferAddress,
+            step_mode: wgpu::VertexStepMode::Vertex,
+            attributes: &Self::ATTRIBS
+        }
+    }
+}
+
+const BLIT_BIND_GROUP_LAYOUT: BindGroupLayoutDescriptor = BindGroupLayoutDescriptor {
+    label: Some("Blit Bind Group Layout"),
+    entries: &[
+        BindGroupLayoutEntry {
+            binding: 0,
+            visibility: ShaderStages::FRAGMENT,
+            ty: BindingType::Texture {
+                sample_type: TextureSampleType::Float { filterable: true },
+                view_dimension: TextureViewDimension::D2,
+                multisampled: false,
+            },
+            count: None,
+        },
+        BindGroupLayoutEntry {
+            binding: 1,
+            visibility: ShaderStages::FRAGMENT,
+            ty: BindingType::Sampler(SamplerBindingType::Filtering),
+            count: None,
+        }
+    ],
+};
+
+const VERTICES: &[Vertex] = &[
+    Vertex {
+        position: [1.0, 1.0, 0.0],
+        tex_coord: [1.0, 1.0],
+    },
+    Vertex {
+        position: [-1.0, 1.0, 0.0],
+        tex_coord: [0.0, 1.0],
+    },
+    Vertex {
+        position: [-1.0, -1.0, 0.0],
+        tex_coord: [0.0, 0.0],
+    },
+    Vertex {
+        position: [1.0, -1.0, 0.0],
+        tex_coord: [1.0, 0.0],
+    },
+];
+
+const INDICES: &[u16] = &[0, 1, 2, 0, 2, 3];

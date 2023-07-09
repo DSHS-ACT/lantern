@@ -11,6 +11,7 @@ use wasm_bindgen::prelude::*;
 use crate::app::Application;
 
 mod app;
+mod lantern;
 
 // wasm 연결시 아래 함수를 시작점으로 삼도록 함.
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen(start))]

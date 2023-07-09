@@ -18,6 +18,8 @@ egui-wgpu = "0.22.0"
 pollster = "0.3.0"
 # cfg-if는 특정 컴파일 설정이 존재하지 않으면 일부 코드를 무시하는 매크로를 제공함
 cfg-if = "1.0.0"
+rand = "0.8.5"
+bytemuck = "1.13.1"
 
 [dependencies.image]
 version = "0.24.6"
