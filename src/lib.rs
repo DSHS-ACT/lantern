@@ -1,5 +1,7 @@
 use std::iter;
 use cfg_if::cfg_if;
+use eframe::egui;
+use eframe::egui::{ClippedPrimitive, FontData, FontDefinitions, FontFamily, ScrollArea, TextEdit};
 use winit::event::{ElementState, Event, KeyboardInput, VirtualKeyCode, WindowEvent};
 use winit::event_loop::{ControlFlow, EventLoop};
 use winit::window::{Icon, Window, WindowBuilder};
@@ -7,7 +9,7 @@ use winit::window::{Icon, Window, WindowBuilder};
 // wasm32 환경에서만 wasm_bindgen 활용
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
-use wgpu::{Backends, Color, CommandEncoderDescriptor, CompositeAlphaMode, Device, DeviceDescriptor, Dx12Compiler, Features, Instance, InstanceDescriptor, Limits, LoadOp, Operations, PowerPreference, PresentMode, Queue, RenderPassColorAttachment, RenderPassDescriptor, RequestAdapterOptions, Surface, SurfaceConfiguration, SurfaceError, TextureUsages, TextureViewDescriptor};
+use wgpu::{Backends, Color, CommandEncoder, CommandEncoderDescriptor, CompositeAlphaMode, Device, DeviceDescriptor, Dx12Compiler, Features, Instance, InstanceDescriptor, Limits, LoadOp, Operations, PowerPreference, PresentMode, Queue, RenderPassColorAttachment, RenderPassDescriptor, RequestAdapterOptions, Surface, SurfaceConfiguration, SurfaceError, TextureUsages, TextureViewDescriptor};
 use winit::dpi::PhysicalSize;
 
 struct Application {
@@ -17,12 +19,16 @@ struct Application {
     config: SurfaceConfiguration,
     size: PhysicalSize<u32>,
     // 무조건 winit의 Window를 쓸 것!
-    pub window: Window,
+    window: Window,
+    egui_state: egui_winit::State,
+    egui_context: eframe::egui::Context,
+    egui_renderer: egui_wgpu::Renderer,
+    egui_screen: egui_wgpu::renderer::ScreenDescriptor
 }
 
 impl Application {
     // Rust식 생성자. new라는 이름의 메서드를 만듦
-    async fn new(window: Window) -> Self {
+    async fn new(window: Window, event_loop: &EventLoop<()>) -> Self {
         let size = window.inner_size();
 
         // instance는 Adapter와 Surface를 만들어주며 이들에 필요한 정보를 제공함.
@@ -99,6 +105,38 @@ impl Application {
         };
         surface.configure(&device, &config);
 
+        let egui_state = egui_winit::State::new(event_loop);
+        let egui_context = eframe::egui::Context::default();
+
+        // 한글 지원 추가
+        let fonts = {
+            // eframe의 Font Definitions
+            let mut default = FontDefinitions::default();
+
+            // eframe의 FontData
+            default.font_data.insert(
+                String::from("Nanum Gothic"),
+                FontData::from_static(include_bytes!("../NanumGothic.ttf"))
+            );
+
+            // eframe::egui::FontFamily
+            default.families.insert(FontFamily::Proportional, vec![String::from("Nanum Gothic")]);
+
+            default
+        };
+        egui_context.set_fonts(fonts);
+
+        let egui_renderer = egui_wgpu::Renderer::new(
+            &device,
+            surface_format,
+            None, // 깊이 안씀
+            1 // 멀티 샘플링 1번만 할꺼임
+        );
+        let egui_screen = egui_wgpu::renderer::ScreenDescriptor {
+            size_in_pixels: [config.width, config.height],
+            pixels_per_point: egui_context.pixels_per_point(),
+        };
+
         Self {
             surface,
             device,
@@ -106,6 +144,10 @@ impl Application {
             config,
             size,
             window,
+            egui_state,
+            egui_context,
+            egui_renderer,
+            egui_screen,
         }
     }
 
@@ -118,6 +160,9 @@ impl Application {
         self.config.width = new_size.width;
         self.config.height = new_size.height;
         self.surface.configure(&self.device, &self.config);
+
+        self.egui_screen.pixels_per_point = self.egui_context.pixels_per_point();
+        self.egui_screen.size_in_pixels = [self.config.width, self.config.height];
     }
 
     fn update(&mut self) {}
@@ -134,7 +179,8 @@ impl Application {
 
         // render_pass가 encoder를 빌려오기 때문에 아래처럼 따로 빼지 않으면 앞으로 계속 쓸 수 없음
         {
-            let _render_pass = encoder.begin_render_pass(&RenderPassDescriptor {
+            let primitives = self.update_egui(&mut encoder);
+            let mut render_pass = encoder.begin_render_pass(&RenderPassDescriptor {
                 label: Some("Render Pass"),
                 // RenderpassColorAttachment: 해당 Render Pass에 가져다 붙일 색상을 지정함
                 // color_attachments를 Option으로 전달하는 이유는
@@ -164,6 +210,8 @@ impl Application {
                 // 깊이맵, 스텐실은 아직 안쓰니 None
                 depth_stencil_attachment: None,
             });
+
+            self.egui_renderer.render(&mut render_pass, &primitives, &self.egui_screen)
         }
 
         // 위에서 render_pass를 이용해 작성한 내용을 이제는 담고 있을 encoder를 마감하고 queue를 통해 device에 전송
@@ -179,7 +227,32 @@ impl Application {
     // false: 아래 event loop에서 처리 해야 함.
     #[allow(unused_variables)]
     fn input(&mut self, event: &WindowEvent) -> bool {
-        false
+        let egui_response = self.egui_state.on_event(&self.egui_context, event);
+        egui_response.consumed | false
+    }
+
+    fn update_egui(&mut self, encoder: &mut CommandEncoder) -> Vec<ClippedPrimitive> {
+        let mut dummy = String::from("3489rty9843yur894uf");
+        let egui_input = self.egui_state.take_egui_input(&self.window);
+        let egui_output = self.egui_context.run(egui_input, |ctx| {
+            egui::SidePanel::right("Side Menu")
+                .resizable(true)
+                .width_range(0.0..=512.0)
+                .default_width(100.0)
+                .show(ctx, |ui| {
+                    TextEdit::singleline(&mut dummy).clip_text(false).desired_width(f32::INFINITY).show(ui);
+                });
+        });
+
+        self.egui_state.handle_platform_output(&self.window, &self.egui_context, egui_output.platform_output);
+        let primitives = self.egui_context.tessellate(egui_output.shapes);
+        egui_output.textures_delta.set.iter().for_each(|(id, delta)| {
+            self.egui_renderer.update_texture(&self.device, &self.queue, *id, &delta);
+        });
+
+        self.egui_renderer.update_buffers(&self.device, &self.queue, encoder, &primitives, &self.egui_screen);
+
+        primitives
     }
 }
 
@@ -241,7 +314,7 @@ pub async fn run() {
         .build(&event_loop)
         .unwrap();
 
-    let mut app = Application::new(window).await;
+    let mut app = Application::new(window, &event_loop).await;
 
     event_loop.run(move |event, _target, control_flow| match event {
         Event::WindowEvent {
