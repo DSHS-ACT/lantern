@@ -8,7 +8,7 @@ use wgpu::{Backends, BindGroup, BindGroupDescriptor, BindGroupEntry, BindGroupLa
 use wgpu::BindingResource::{Sampler, TextureView};
 use wgpu::util::{BufferInitDescriptor, DeviceExt};
 use winit::dpi::PhysicalSize;
-use winit::event::WindowEvent;
+use winit::event::{ElementState, KeyboardInput, MouseButton, WindowEvent};
 use winit::event_loop::EventLoop;
 use winit::window::Window;
 
@@ -26,6 +26,7 @@ pub struct Application {
     blit_bind_group: BindGroup,
     // 무조건 winit의 Window를 쓸 것!
     pub window: Window,
+    show_egui: bool,
     egui_state: egui_winit::State,
     egui_context: eframe::egui::Context,
     egui_renderer: egui_wgpu::Renderer,
@@ -162,7 +163,7 @@ impl Application {
                 entry_point: "fs_main",
                 targets: &[Some(ColorTargetState {
                     format: config.format,
-                    blend: Some(BlendState::REPLACE),
+                    blend: Some(BlendState::ALPHA_BLENDING),
                     write_mask: ColorWrites::ALL
                 })],
             }),
@@ -227,6 +228,7 @@ impl Application {
             index_buffer,
             blit_bind_group,
             window,
+            show_egui: false,
             egui_state,
             egui_context,
             egui_renderer,
@@ -320,7 +322,9 @@ impl Application {
             render_pass.set_bind_group(0, &self.blit_bind_group, &[]);
             render_pass.draw_indexed(0..6, 0, 0..1);
 
-            self.egui_renderer.render(&mut render_pass, &primitives, &self.egui_screen)
+            if self.show_egui {
+                self.egui_renderer.render(&mut render_pass, &primitives, &self.egui_screen)
+            }
         }
 
         // 위에서 render_pass를 이용해 작성한 내용을 이제는 담고 있을 encoder를 마감하고 queue를 통해 device에 전송
@@ -337,16 +341,28 @@ impl Application {
     #[allow(unused_variables)]
     pub fn input(&mut self, event: &WindowEvent) -> bool {
         let egui_response = self.egui_state.on_event(&self.egui_context, event);
-        egui_response.consumed | false
+        if egui_response.consumed {
+            return true;
+        };
+
+        match event {
+            WindowEvent::MouseInput {
+                state: ElementState::Pressed, button: MouseButton::Right, ..
+            } => {
+                self.show_egui = !self.show_egui;
+                true
+            },
+            _ => {
+                false
+            }
+        }
     }
 
     fn update_egui(&mut self, encoder: &mut CommandEncoder) -> Vec<ClippedPrimitive> {
         let egui_input = self.egui_state.take_egui_input(&self.window);
         let egui_output = self.egui_context.run(egui_input, |ctx| {
-            eframe::egui::SidePanel::right("렌더 정보")
+            eframe::egui::Window::new("설정")
                 .resizable(true)
-                .width_range(0.0..=512.0)
-                .default_width(120.0)
                 .show(ctx, |ui| {
                     let current = SystemTime::now();
                     let since_epoch = current.duration_since(UNIX_EPOCH).unwrap();
