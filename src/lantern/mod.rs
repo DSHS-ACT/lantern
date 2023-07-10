@@ -35,6 +35,10 @@ impl Lantern {
 
     pub fn update(&mut self, queue: &Queue) {
         let size = self.final_image.size();
+        let ratio = {
+            let size = self.final_image.size();
+            size.width as f32 / size.height as f32
+        };
 
         // 메모리 구조상 y 먼저가 더 효율적!
         for y in 0..size.height {
@@ -43,6 +47,7 @@ impl Lantern {
                 let mut coord = Vector2::new((x as f32) / (size.width as f32), (y as f32) / (size.height as f32));
                 coord *= 2.0;
                 coord -= Vector2::new(1.0, 1.0);
+                coord.x *= ratio;
 
                 self.final_image_data[index as usize] = self.process_pixel(coord);
             }
