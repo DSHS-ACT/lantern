@@ -1,4 +1,5 @@
 use cfg_if::cfg_if;
+use nalgebra::Vector4;
 use wgpu::SurfaceError;
 use winit::event::{ElementState, Event, KeyboardInput, VirtualKeyCode, WindowEvent};
 use winit::event_loop::{ControlFlow, EventLoop};
@@ -113,4 +114,13 @@ pub async fn run() {
         }
         _ => {}
     });
+}
+
+fn vec4_to_rgba(vec4: &Vector4<f32>) -> u32 {
+    let red = (vec4.x * 255.0) as u32;
+    let green = (vec4.y * 255.0) as u32;
+    let blue = (vec4.z * 255.0) as u32;
+    let alpha = (vec4.w * 255.0) as u32;
+
+    (alpha << 24) | (blue << 16) | (green << 8) | red
 }

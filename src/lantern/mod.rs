@@ -1,10 +1,12 @@
+use std::cmp::max;
 use bytemuck::cast_slice;
-use nalgebra::{Vector2, Vector3};
+use nalgebra::{SimdPartialOrd, Vector2, Vector3, Vector4};
 use rand::RngCore;
 use wgpu::{Device, Queue};
 use winit::dpi::PhysicalSize;
 
 use crate::lantern::texture::Image;
+use crate::vec4_to_rgba;
 
 mod texture;
 
@@ -49,16 +51,19 @@ impl Lantern {
                 coord -= Vector2::new(1.0, 1.0);
                 coord.x *= ratio;
 
-                self.final_image_data[index as usize] = self.process_pixel(coord);
+                self.final_image_data[index as usize] = vec4_to_rgba(
+                    &self.process_pixel(coord)
+                        .simd_clamp(Vector4::zeros(), Vector4::new(1.0, 1.0, 1.0, 1.0))
+                );
             }
         }
 
         self.final_image.load_image(queue, cast_slice(&self.final_image_data))
     }
 
-    pub fn process_pixel(&mut self, coord: Vector2<f32>) -> u32 {
-        let origin = Vector3::new(0.0f32, 0.0, -2.0);
-        let ray_direction = Vector3::new(coord.x, coord.y, 1.0).normalize();
+    pub fn process_pixel(&mut self, coord: Vector2<f32>) -> Vector4<f32> {
+        let origin = Vector3::new(0.0f32, 0.0, -1.0);
+        let ray_direction = Vector3::new(coord.x, coord.y, 1.0);
         let radius = 0.5f32;
 
         // a = 빔 시작
@@ -74,17 +79,22 @@ impl Lantern {
         // 판별식
         let discriminant = second.powi(2) - 4.0 * first * third;
 
-        let distance = if discriminant >= 0.0 {
-            let t = (-second - discriminant.sqrt()) / (2.0 * first);
-            t
-        } else {
-            f32::INFINITY
-        };
+        if discriminant < 0.0 {
+            return Vector4::new(0.0, 0.0, 0.0, 1.0);
+        }
 
+        let distance = (-second - discriminant.sqrt()) / (2.0 * first);
+        let point = origin + (ray_direction * distance);
+        let normalized = point / radius;
+        let mut color = (normalized + Vector3::new(1.0, 1.0, 1.0)) / 2.0;
 
+        let light_direction = Vector3::new(-1.0, -1.0, 1.0).normalize();
+        let flipped = -light_direction;
 
-        let alpha = ((2.0 / distance) * 255.0) as u32;
+        let intensity = flipped.dot(&normalized).max(0.0); // cos(v1, v2) = v1 * v2 IF both normal
+        color *= intensity;
 
-        alpha << 24 | 0x00FFFF00
+        return Vector4::new(color.x, color.y, color.z, 1.0);
     }
 }
+
