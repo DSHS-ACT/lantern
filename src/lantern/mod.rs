@@ -4,25 +4,31 @@ use nalgebra::{SimdPartialOrd, Vector2, Vector3, Vector4};
 use rand::RngCore;
 use wgpu::{Device, Queue};
 use winit::dpi::PhysicalSize;
+use crate::lantern::camera::Camera;
 
 use crate::lantern::texture::Image;
 use crate::vec4_to_rgba;
 
 mod texture;
+mod camera;
+mod ray;
 
 pub struct Lantern {
     pub final_image: Image,
-    pub final_image_data: Vec<u32>
+    pub final_image_data: Vec<u32>,
+    pub camera: Camera
 }
 
 impl Lantern {
     pub fn new(device: &Device, viewport_size: PhysicalSize<u32>) -> Self {
         let final_image = Image::new(device, viewport_size.width, viewport_size.height, "Lantern Output");
         let final_image_data = vec![0; (viewport_size.width * viewport_size.height) as usize];
+        let camera = Camera::new(90.0, 0.1, 100.0, viewport_size);
 
         Self {
             final_image,
             final_image_data,
+            camera,
         }
     }
 

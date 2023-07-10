@@ -1,6 +1,18 @@
 use std::iter;
 use std::mem::size_of;
-use std::time::{SystemTime, UNIX_EPOCH};
+use cfg_if::cfg_if;
+
+cfg_if! {
+    // 만약 현재 환경이 wasm32라면
+    if #[cfg(target_arch = "wasm32")] {
+        // web time 사용
+        use web_time::{SystemTime, UNIX_EPOCH};
+    } else {
+        // 네이티브 time 사용
+        use std::time::{SystemTime, UNIX_EPOCH};
+    }
+}
+
 
 use bytemuck::{Pod, Zeroable};
 use eframe::egui::{ClippedPrimitive, FontData, FontDefinitions, FontFamily, Label, Widget};
@@ -340,22 +352,20 @@ impl Application {
     // false: 아래 event loop에서 처리 해야 함.
     #[allow(unused_variables)]
     pub fn input(&mut self, event: &WindowEvent) -> bool {
-        let egui_response = self.egui_state.on_event(&self.egui_context, event);
-        if egui_response.consumed {
+        if self.egui_state.on_event(&self.egui_context, event).consumed {
             return true;
-        };
-
+        }
         match event {
             WindowEvent::MouseInput {
                 state: ElementState::Pressed, button: MouseButton::Right, ..
             } => {
                 self.show_egui = !self.show_egui;
-                true
+                return true
             },
-            _ => {
-                false
-            }
-        }
+            _ => {}
+        };
+
+        self.lantern.camera.input(event)
     }
 
     fn update_egui(&mut self, encoder: &mut CommandEncoder) -> Vec<ClippedPrimitive> {

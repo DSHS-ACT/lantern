@@ -49,3 +49,4 @@ web-sys = { version = "0.3.64", features = [
     "Window",
     "Element",
 ]}
+web-time = "0.2.0"
