@@ -4,39 +4,38 @@ use winit::dpi::{PhysicalPosition, PhysicalSize};
 use winit::event::{ElementState, KeyboardInput, VirtualKeyCode, WindowEvent};
 
 pub struct Camera {
-    projection: Matrix4<f32>,
+    projection: Perspective3<f32>,
     view: Matrix4<f32>,
-    inverse_projection: Matrix4<f32>,
     inverse_view: Matrix4<f32>,
 
     vertical_fov: f32,
     near: f32,
     far: f32,
 
-    position: Point3<f32>,
+    pub position: Point3<f32>,
     forward: Unit<Vector3<f32>>,
 
-    rays: Vec<Vector3<f32>>,
+    pub rays: Vec<Vector3<f32>>,
     last_mouse: PhysicalPosition<f64>,
 
     viewport_size: PhysicalSize<u32>,
+
+    inputs: [bool; 6] // WASD SPACE SHIFT
 }
 
 impl Camera {
     pub fn new(vertical_fov: f32, near: f32, far: f32, viewport_size: PhysicalSize<u32>) -> Self {
         let aspect = viewport_size.width as f32 / viewport_size.height as f32;
-        let projection = Perspective3::new(aspect, vertical_fov, near, far).to_homogeneous();
+        let projection = Perspective3::new(aspect, vertical_fov, near, far);
         let position = Point3::origin();
         let forward = Vector3::z_axis();
         let view: Matrix4<f32> = Matrix4::look_at_lh(&position, &Point3::from(forward.data.0[0]), &Vector3::y_axis());
 
-        let inverse_projection = projection.try_inverse().unwrap();
         let inverse_view = view.try_inverse().unwrap();
 
         Self {
             projection,
             view,
-            inverse_projection,
             inverse_view,
             vertical_fov,
             near,
@@ -46,12 +45,13 @@ impl Camera {
             rays: vec![],
             last_mouse: Default::default(),
             viewport_size,
+            inputs: [false; 6],
         }
     }
 
     pub fn input(&mut self, event: &WindowEvent) -> bool {
         match event {
-            WindowEvent::CursorMoved { position, .. } => {
+            /*WindowEvent::CursorMoved { position, .. } => {
                 let delta = Vector2::new(
                     (position.x - self.last_mouse.x) as f32,
                     (position.y - self.last_mouse.y) as f32,
@@ -70,35 +70,77 @@ impl Camera {
                 let combined = pitch_rotation * yaw_rotation;
 
                 self.forward = combined * self.forward;
+                self.forward.renormalize_fast();
 
-                assert!((0.98..1.02).contains(&self.forward.magnitude_squared()));
                 self.reevaluate_view();
                 self.reevaluate_rays();
 
                 true
-            }
+            }*/
             WindowEvent::KeyboardInput {
                 input: KeyboardInput {
-                    state: ElementState::Pressed,
+                    state,
                     virtual_keycode: Some(key),
                     ..
                 },
                 ..
             } => {
-                // todo
+                let is_press = matches!(state, ElementState::Pressed);
                 match key {
-                    VirtualKeyCode::W => {
-                        //self.position += self.forward * self.movement_speed() *
+                    VirtualKeyCode::W => self.inputs[0] = is_press,
+                    VirtualKeyCode::A => self.inputs[1] = is_press,
+                    VirtualKeyCode::S => self.inputs[2] = is_press,
+                    VirtualKeyCode::D => self.inputs[3] = is_press,
+                    VirtualKeyCode::Space => self.inputs[4] = is_press,
+                    VirtualKeyCode::LShift => self.inputs[5] = is_press,
+                    _ => {
+                        return false
                     }
-                    _ => {}
                 };
-                false
+
+                true
             }
             _ => false,
         }
     }
 
-    pub fn update(&self, time_step: f32) {}
+    pub fn update(&mut self, frame_time: u128) {
+        let time_step = ((frame_time as f32) / 1000.0).min(1.0 / 60.0);
+
+        let up: Unit<Vector3<f32>> = Vector3::y_axis();
+        let right = Unit::new_unchecked(self.forward.cross(&up));
+        let mut moved = false;
+
+        if self.inputs[0] {
+            self.position += self.forward.scale(self.movement_speed() * time_step);
+            moved = true;
+        }
+        if self.inputs[1] {
+            self.position -= right.scale(self.movement_speed() * time_step);
+            moved = true;
+        }
+        if self.inputs[2] {
+            self.position -= self.forward.scale(self.movement_speed() * time_step);
+            moved = true;
+        }
+        if self.inputs[3] {
+            self.position += right.scale(self.movement_speed() * time_step);
+            moved = true;
+        }
+        if self.inputs[4] {
+            self.position += up.scale(self.movement_speed() * time_step);
+            moved = true;
+        }
+        if self.inputs[5] {
+            self.position -= up.scale(self.movement_speed() * time_step);
+            moved = true;
+        }
+
+        if moved {
+            self.reevaluate_view();
+            self.reevaluate_rays();
+        }
+    }
 
     pub fn resize(&mut self, new_size: PhysicalSize<u32>) {
         self.viewport_size = new_size;
@@ -117,8 +159,7 @@ impl Camera {
 
     fn reevaluate_projection(&mut self) {
         let aspect = self.viewport_size.width as f32 / self.viewport_size.height as f32;
-        self.projection = Perspective3::new(aspect, self.vertical_fov, self.near, self.far).to_homogeneous();
-        self.inverse_projection = self.projection.try_inverse().unwrap();
+        self.projection = Perspective3::new(aspect, self.vertical_fov, self.near, self.far);
     }
 
     fn reevaluate_view(&mut self) {
@@ -129,24 +170,24 @@ impl Camera {
 
     fn reevaluate_rays(&mut self) {
         let mut new_rays = Vec::with_capacity((self.viewport_size.width * self.viewport_size.height) as usize);
+        let ratio = self.viewport_size.width as f32 / self.viewport_size.height as f32;
+        dbg!(ratio);
 
         for y in 0..self.viewport_size.height {
             for x in 0..self.viewport_size.width {
-                let coord = Vector2::new(
+                let mut coord = Vector2::new(
                     x as f32 / self.viewport_size.width as f32,
                     y as f32 / self.viewport_size.height as f32,
-                ) * 2.0 - Vector2::new(1.0, 1.0);
+                );
+                coord *= 2.0;
+                coord -= Vector2::new(1.0, 1.0);
 
-                let mut target = self.inverse_projection * Vector4::new(coord.x, coord.y, 1.0, 1.0); // 월드 좌표
-                target /= target.w;
+                let target = self.projection.as_matrix() * Vector4::new(coord.x, coord.y, 1.0,1.0);
+                let normalized = (target.xyz() / target.w).normalize();
 
-                let mut normalized: Vector4<f32> = target.clone();
-                normalized.w = 0.0;
-                normalized = normalized.normalize();
+                let ray_direction = self.inverse_view * Vector4::new(normalized.x, normalized.y, normalized.z, 0.0);
 
-                let ray_direction = (self.inverse_view * normalized).xyz();
-
-                new_rays.push(ray_direction);
+                new_rays.push(ray_direction.xyz());
             }
         }
 

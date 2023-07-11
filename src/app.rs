@@ -1,18 +1,5 @@
 use std::iter;
 use std::mem::size_of;
-use cfg_if::cfg_if;
-
-cfg_if! {
-    // 만약 현재 환경이 wasm32라면
-    if #[cfg(target_arch = "wasm32")] {
-        // web time 사용
-        use web_time::{SystemTime, UNIX_EPOCH};
-    } else {
-        // 네이티브 time 사용
-        use std::time::{SystemTime, UNIX_EPOCH};
-    }
-}
-
 
 use bytemuck::{Pod, Zeroable};
 use eframe::egui::{ClippedPrimitive, FontData, FontDefinitions, FontFamily, Label, Widget};
@@ -20,10 +7,11 @@ use wgpu::{Backends, BindGroup, BindGroupDescriptor, BindGroupEntry, BindGroupLa
 use wgpu::BindingResource::{Sampler, TextureView};
 use wgpu::util::{BufferInitDescriptor, DeviceExt};
 use winit::dpi::PhysicalSize;
-use winit::event::{ElementState, KeyboardInput, MouseButton, WindowEvent};
+use winit::event::{ElementState, MouseButton, WindowEvent};
 use winit::event_loop::EventLoop;
 use winit::window::Window;
 
+use crate::camera::Camera;
 use crate::lantern::Lantern;
 
 pub struct Application {
@@ -43,8 +31,8 @@ pub struct Application {
     egui_context: eframe::egui::Context,
     egui_renderer: egui_wgpu::Renderer,
     egui_screen: egui_wgpu::renderer::ScreenDescriptor,
-    when_last_frame: u128,
-    pub lantern: Lantern
+    pub lantern: Lantern,
+    camera: Camera
 }
 
 impl Application {
@@ -228,6 +216,7 @@ impl Application {
             size_in_pixels: [config.width, config.height],
             pixels_per_point: egui_context.pixels_per_point(),
         };
+        let camera = Camera::new(45.0, 0.1, 100.0, size);
 
         Self {
             surface,
@@ -245,8 +234,8 @@ impl Application {
             egui_context,
             egui_renderer,
             egui_screen,
-            when_last_frame: 0,
             lantern,
+            camera,
         }
     }
 
@@ -263,6 +252,7 @@ impl Application {
         self.egui_screen.pixels_per_point = self.egui_context.pixels_per_point();
         self.egui_screen.size_in_pixels = [self.config.width, self.config.height];
         self.lantern.resize(&self.device, new_size);
+        self.camera.resize(new_size);
 
         self.blit_bind_group = self.device.create_bind_group(&BindGroupDescriptor {
             label: Some("Blit Bind Group"),
@@ -280,11 +270,12 @@ impl Application {
         });
     }
 
-    pub fn update(&mut self) {
-        self.lantern.update(&self.queue)
+    pub fn update(&mut self, frame_time: u128) {
+        self.camera.update(frame_time);
+        self.lantern.update(&self.queue, &self.camera)
     }
 
-    pub fn render(&mut self) -> Result<(), SurfaceError> {
+    pub fn render(&mut self, frame_time: u128) -> Result<(), SurfaceError> {
         let output = self.surface.get_current_texture()?; // 렌더링 결과를 출력할 곳
 
         // view는 위에서 가져온 output을 다뤄주는 것임.
@@ -296,7 +287,7 @@ impl Application {
 
         // render_pass가 encoder를 빌려오기 때문에 아래처럼 따로 빼지 않으면 앞으로 계속 쓸 수 없음
         {
-            let primitives = self.update_egui(&mut encoder);
+            let primitives = self.update_egui(&mut encoder, frame_time);
             let mut render_pass = encoder.begin_render_pass(&RenderPassDescriptor {
                 label: Some("Render Pass"),
                 // RenderpassColorAttachment: 해당 Render Pass에 가져다 붙일 색상을 지정함
@@ -365,22 +356,18 @@ impl Application {
             _ => {}
         };
 
-        self.lantern.camera.input(event)
+        self.camera.input(event)
     }
 
-    fn update_egui(&mut self, encoder: &mut CommandEncoder) -> Vec<ClippedPrimitive> {
+    fn update_egui(&mut self, encoder: &mut CommandEncoder, frame_time: u128) -> Vec<ClippedPrimitive> {
         let egui_input = self.egui_state.take_egui_input(&self.window);
         let egui_output = self.egui_context.run(egui_input, |ctx| {
             eframe::egui::Window::new("설정")
                 .resizable(true)
                 .show(ctx, |ui| {
-                    let current = SystemTime::now();
-                    let since_epoch = current.duration_since(UNIX_EPOCH).unwrap();
-
-                    Label::new(format!("프레임 처리 시간: {} ms", (since_epoch.as_millis() - self.when_last_frame)))
+                    Label::new(format!("프레임 처리 시간: {} ms", (frame_time)))
                         .wrap(false)
                         .ui(ui);
-                    self.when_last_frame = since_epoch.as_millis();
                 });
         });
 

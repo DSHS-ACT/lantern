@@ -5,6 +5,17 @@ use winit::event::{ElementState, Event, KeyboardInput, VirtualKeyCode, WindowEve
 use winit::event_loop::{ControlFlow, EventLoop};
 use winit::window::{Icon, WindowBuilder};
 
+cfg_if! {
+    // 만약 현재 환경이 wasm32라면
+    if #[cfg(target_arch = "wasm32")] {
+        // web time 사용
+        use web_time::{SystemTime, UNIX_EPOCH};
+    } else {
+        // 네이티브 time 사용
+        use std::time::{SystemTime, UNIX_EPOCH};
+    }
+}
+
 // wasm32 환경에서만 wasm_bindgen 활용
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
@@ -13,6 +24,7 @@ use crate::app::Application;
 
 mod app;
 mod lantern;
+mod camera;
 
 // wasm 연결시 아래 함수를 시작점으로 삼도록 함.
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen(start))]
@@ -74,6 +86,7 @@ pub async fn run() {
 
 
     let mut app = Application::new(window, &event_loop).await;
+    let mut last_frame_time = now();
 
     event_loop.run(move |event, _target, control_flow| match event {
         Event::WindowEvent {
@@ -94,8 +107,11 @@ pub async fn run() {
             _ => {}
         },
         Event::RedrawRequested(window_id) if window_id == app.window.id() => {
-            app.update();
-            match app.render() {
+            let now = now();
+            let frame_time = now - last_frame_time;
+
+            app.update(frame_time);
+            match app.render(frame_time) {
                 Ok(_) => {},
                 // 모종의 이유로 swap chain이 깨지면 surface를 재구성하기.
                 Err(SurfaceError::Lost) => app.resize(app.size),
@@ -105,6 +121,8 @@ pub async fn run() {
                 // Outdated, Timeout은 그냥 다음 프레임때면 알아서 고쳐지니 출력만 하고 아무것도 하지 말기
                 Err(e) => eprintln!("{:?}", e),
             }
+
+            last_frame_time = now;
         }
         // window.request_redraw는 앱 시작시 원랜 한번만 실행됨
         // 그러나 우린 실시간 렌더링 앱을 만들기에 계속 다시 그려야함
@@ -124,3 +142,11 @@ fn vec4_to_rgba(vec4: &Vector4<f32>) -> u32 {
 
     (alpha << 24) | (blue << 16) | (green << 8) | red
 }
+
+fn now() -> u128 {
+    let current = SystemTime::now();
+    let since_epoch = current.duration_since(UNIX_EPOCH).unwrap();
+
+    since_epoch.as_millis()
+}
+
