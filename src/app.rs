@@ -6,7 +6,7 @@ use eframe::egui::{ClippedPrimitive, FontData, FontDefinitions, FontFamily, Labe
 use wgpu::{Backends, BindGroup, BindGroupDescriptor, BindGroupEntry, BindGroupLayoutDescriptor, BindGroupLayoutEntry, BindingType, BlendState, Buffer, BufferUsages, Color, ColorTargetState, ColorWrites, CommandEncoder, CommandEncoderDescriptor, CompositeAlphaMode, Device, DeviceDescriptor, Dx12Compiler, Face, Features, FragmentState, FrontFace, include_wgsl, IndexFormat, Instance, InstanceDescriptor, Limits, LoadOp, MultisampleState, Operations, PipelineLayoutDescriptor, PolygonMode, PowerPreference, PresentMode, PrimitiveState, PrimitiveTopology, Queue, RenderPassColorAttachment, RenderPassDescriptor, RenderPipeline, RenderPipelineDescriptor, RequestAdapterOptions, SamplerBindingType, ShaderStages, Surface, SurfaceConfiguration, SurfaceError, TextureSampleType, TextureUsages, TextureViewDescriptor, TextureViewDimension, vertex_attr_array, VertexAttribute, VertexBufferLayout, VertexState};
 use wgpu::BindingResource::{Sampler, TextureView};
 use wgpu::util::{BufferInitDescriptor, DeviceExt};
-use winit::dpi::PhysicalSize;
+use winit::dpi::{PhysicalPosition, PhysicalSize};
 use winit::event::{ElementState, MouseButton, WindowEvent};
 use winit::event_loop::EventLoop;
 use winit::window::Window;
@@ -272,7 +272,17 @@ impl Application {
 
     pub fn update(&mut self, frame_time: u128) {
         self.camera.update(frame_time);
-        self.lantern.update(&self.queue, &self.camera)
+        self.lantern.update(&self.queue, &self.camera);
+
+        if self.camera.grab_mouse {
+            let center = PhysicalPosition::new(self.size.width / 2, self.size.height / 2);
+            if let Err(e) = self.window.set_cursor_position(center) {
+                eprintln!("{e}");
+            }
+
+            self.camera.last_mouse.x = center.x as f64;
+            self.camera.last_mouse.y = center.y as f64;
+        }
     }
 
     pub fn render(&mut self, frame_time: u128) -> Result<(), SurfaceError> {
