@@ -27,9 +27,10 @@ impl Camera {
     pub fn new(vertical_fov: f32, near: f32, far: f32, viewport_size: PhysicalSize<u32>) -> Self {
         let aspect = viewport_size.width as f32 / viewport_size.height as f32;
         let projection = Perspective3::new(aspect, vertical_fov, near, far);
-        let position = Point3::origin();
-        let forward = Unit::new_unchecked(Vector3::new(0.0, 0.0, 1.0));
-        let view = Isometry3::look_at_lh(&position, &Point3::from(forward.data.0[0]), &Vector3::y_axis());
+        let position = Point3::from([0.0, 0.0, -1.0]);
+        let forward = Vector3::z_axis();
+        let target = position.add(&forward.into_inner().into());
+        let view = Isometry3::look_at_lh(&position, &target, &Vector3::y_axis());
 
         Self {
             projection,
@@ -57,19 +58,21 @@ impl Camera {
                 self.last_mouse = *position;
 
                 let up: Unit<Vector3<f32>> = Vector3::y_axis();
-                let right = Unit::new_unchecked(self.forward.cross(&up));
+                let right = Unit::new_unchecked(up.cross(&self.forward));
 
-                let pitch_delta = delta.y * self.rotation_speed();
-                let yaw_delta = delta.x * self.rotation_speed();
+                let pitch_delta = delta.y * self.rotation_speed(); // negative when up
+                let yaw_delta = delta.x * self.rotation_speed(); // positive when right
 
-                let q = UnitQuaternion::from_axis_angle(&right, pitch_delta)
-                    * UnitQuaternion::from_axis_angle(&up, yaw_delta);
+                let q = UnitQuaternion::from_axis_angle(&right, -pitch_delta)
+                    * UnitQuaternion::from_axis_angle(&up, -yaw_delta);
 
                 self.forward = q * self.forward;
                 self.forward.renormalize_fast();
 
                 self.reevaluate_view();
                 self.reevaluate_rays();
+
+                self.forward = Vector3::z_axis();
 
                 true
             }
@@ -107,7 +110,7 @@ impl Camera {
         let time_step = ((frame_time as f32) / 1000.0).min(1.0 / 60.0);
 
         let up: Unit<Vector3<f32>> = Vector3::y_axis();
-        let right = self.forward.cross(&up).normalize();
+        let right = up.cross(&self.forward);
         let mut moved = false;
 
         if self.inputs[0] {
@@ -136,7 +139,6 @@ impl Camera {
         }
 
         if moved {
-            dbg!(self.position);
             self.reevaluate_view();
             self.reevaluate_rays();
         }
@@ -163,8 +165,8 @@ impl Camera {
     }
 
     fn reevaluate_view(&mut self) {
-        let point = self.position.add(self.forward.into_inner());
-        self.view = Isometry3::face_towards(&self.position, &point, &Vector3::new(0.0, 1.0, 0.0));
+        let point = self.position.add(self.forward.clone_owned());
+        self.view = Isometry3::look_at_lh(&self.position, &point, &Vector3::y_axis());
     }
 
     fn reevaluate_rays(&mut self) {
@@ -179,8 +181,8 @@ impl Camera {
                 coord *= 2.0;
                 coord -= Vector2::new(1.0, 1.0);
 
-                let target = self.projection.as_matrix() * Vector4::new(coord.x, coord.y, 1.0,1.0);
-                let normalized = (target.xyz()).normalize();
+                let target = self.projection.inverse() * Vector4::new(coord.x, coord.y, 1.0,1.0);
+                let normalized = (target.xyz() / target.w).normalize();
 
                 let ray_direction = self.view.inverse_transform_vector(&normalized);
 
