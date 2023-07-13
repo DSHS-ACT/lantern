@@ -82,19 +82,19 @@ impl Lantern {
         }
 
         let distance = (-second - discriminant.sqrt()) / (2.0 * first);
-        /*if distance < 0.0 {
+        if distance < 0.0 {
             return Vector4::new(0.0, 0.0, 0.0, 1.0);
-        }*/
+        }
 
         let point = ray.origin + (ray.direction * distance);
         let normalized = point / radius;
-        let color = (normalized + Vector3::new(1.0, 1.0, 1.0)) / 2.0;
+        let mut color = (normalized + Vector3::new(1.0, 1.0, 1.0)) / 2.0;
 
-        let light_direction = Vector3::new(0.0, -1.0, 0.0).normalize();
+        let light_direction = Vector3::new(-1.0, -1.0, 1.0).normalize();
         let flipped = -light_direction;
 
         let intensity = flipped.dot(&normalized.coords).max(0.0); // cos(v1, v2) = v1 * v2 IF both normal
-        // color *= intensity;
+        color *= intensity;
 
         Vector4::new(color.x, color.y, color.z, 1.0)
     }

@@ -1,6 +1,6 @@
 use std::ops::Add;
 
-use nalgebra::{Isometry3, Perspective3, Point3, Unit, UnitQuaternion, Vector2, Vector3, Vector4};
+use nalgebra::{Isometry3, Matrix4, Perspective3, Point3, Unit, UnitQuaternion, Vector2, Vector3, Vector4};
 use winit::dpi::{PhysicalPosition, PhysicalSize};
 use winit::event::{ElementState, KeyboardInput, VirtualKeyCode, WindowEvent};
 
@@ -28,7 +28,12 @@ impl Camera {
     pub fn new(vertical_fov: f32, near: f32, far: f32, viewport_size: PhysicalSize<u32>) -> Self {
         let aspect = viewport_size.width as f32 / viewport_size.height as f32;
 
-        let projection = Perspective3::new(aspect, vertical_fov, near, far);
+        let projection = {
+            let right = Perspective3::new(aspect, vertical_fov, near, far).into_inner();
+            let mut z_flip = Matrix4::identity();
+            z_flip[(2, 2)] = -1.0;
+            Perspective3::from_matrix_unchecked(right * z_flip)
+        };
         let position = Point3::from([0.0, 0.0, -1.0]);
         let forward = Vector3::z_axis();
         let target = position.add(&forward.into_inner());
@@ -165,7 +170,11 @@ impl Camera {
 
     fn reevaluate_projection(&mut self) {
         let aspect = self.viewport_size.width as f32 / self.viewport_size.height as f32;
-        self.projection = Perspective3::new(aspect, self.vertical_fov, self.near, self.far);
+
+        let right = Perspective3::new(aspect, self.vertical_fov, self.near, self.far).into_inner();
+        let mut z_flip = Matrix4::identity();
+        z_flip[(2, 2)] = -1.0;
+        self.projection = Perspective3::from_matrix_unchecked(right * z_flip);
     }
 
     fn reevaluate_view(&mut self) {
@@ -187,8 +196,7 @@ impl Camera {
 
                 let target = self.projection.inverse() * Vector4::new(coord.x, coord.y, 1.0,1.0);
                 // Frustum is right handed, z is inverted
-                let mut normalized = (target.xyz() / target.w).normalize();
-                normalized.z = -normalized.z;
+                let normalized = (target.xyz() / target.w).normalize();
 
                 let ray_direction = self.view.inverse_transform_vector(&normalized);
 
