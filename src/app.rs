@@ -351,19 +351,15 @@ impl Application {
 
     // true: 앱에서 입력 처리를 했으니 따로 관리할 필요 없음
     // false: 아래 event loop에서 처리 해야 함.
-    #[allow(unused_variables)]
     pub fn input(&mut self, event: &WindowEvent) -> bool {
         if self.egui_state.on_event(&self.egui_context, event).consumed {
             return true;
         }
-        match event {
-            WindowEvent::MouseInput {
+        if let WindowEvent::MouseInput {
                 state: ElementState::Pressed, button: MouseButton::Right, ..
-            } => {
-                self.show_egui = !self.show_egui;
-                return true
-            },
-            _ => {}
+            } = event {
+            self.show_egui = !self.show_egui;
+            return true
         };
 
         self.camera.input(event)
@@ -384,7 +380,7 @@ impl Application {
         self.egui_state.handle_platform_output(&self.window, &self.egui_context, egui_output.platform_output);
         let primitives = self.egui_context.tessellate(egui_output.shapes);
         egui_output.textures_delta.set.iter().for_each(|(id, delta)| {
-            self.egui_renderer.update_texture(&self.device, &self.queue, *id, &delta);
+            self.egui_renderer.update_texture(&self.device, &self.queue, *id, delta);
         });
 
         self.egui_renderer.update_buffers(&self.device, &self.queue, encoder, &primitives, &self.egui_screen);

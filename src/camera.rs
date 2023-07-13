@@ -1,5 +1,6 @@
 use std::ops::Add;
-use nalgebra::{Isometry3, IsometryMatrix3, Matrix4, Perspective3, Point3, Quaternion, Rotation3, Unit, UnitQuaternion, Vector2, Vector3, Vector4};
+
+use nalgebra::{Isometry3, Perspective3, Point3, Unit, UnitQuaternion, Vector2, Vector3, Vector4};
 use winit::dpi::{PhysicalPosition, PhysicalSize};
 use winit::event::{ElementState, KeyboardInput, VirtualKeyCode, WindowEvent};
 
@@ -26,13 +27,14 @@ pub struct Camera {
 impl Camera {
     pub fn new(vertical_fov: f32, near: f32, far: f32, viewport_size: PhysicalSize<u32>) -> Self {
         let aspect = viewport_size.width as f32 / viewport_size.height as f32;
+
         let projection = Perspective3::new(aspect, vertical_fov, near, far);
         let position = Point3::from([0.0, 0.0, -1.0]);
         let forward = Vector3::z_axis();
-        let target = position.add(&forward.into_inner().into());
+        let target = position.add(&forward.into_inner());
         let view = Isometry3::look_at_lh(&position, &target, &Vector3::y_axis());
 
-        Self {
+        let mut to_return = Self {
             projection,
             view,
             vertical_fov,
@@ -45,7 +47,11 @@ impl Camera {
             viewport_size,
             inputs: [false; 6],
             grab_mouse: false
-        }
+        };
+
+        to_return.reevaluate_rays();
+
+        to_return
     }
 
     pub fn input(&mut self, event: &WindowEvent) -> bool {
@@ -63,16 +69,14 @@ impl Camera {
                 let pitch_delta = delta.y * self.rotation_speed(); // negative when up
                 let yaw_delta = delta.x * self.rotation_speed(); // positive when right
 
-                let q = UnitQuaternion::from_axis_angle(&right, -pitch_delta)
-                    * UnitQuaternion::from_axis_angle(&up, -yaw_delta);
+                let q = UnitQuaternion::from_axis_angle(&right, pitch_delta)
+                    * UnitQuaternion::from_axis_angle(&up, yaw_delta);
 
                 self.forward = q * self.forward;
                 self.forward.renormalize_fast();
 
                 self.reevaluate_view();
                 self.reevaluate_rays();
-
-                self.forward = Vector3::z_axis();
 
                 true
             }
@@ -182,7 +186,9 @@ impl Camera {
                 coord -= Vector2::new(1.0, 1.0);
 
                 let target = self.projection.inverse() * Vector4::new(coord.x, coord.y, 1.0,1.0);
-                let normalized = (target.xyz() / target.w).normalize();
+                // Frustum is right handed, z is inverted
+                let mut normalized = (target.xyz() / target.w).normalize();
+                normalized.z = -normalized.z;
 
                 let ray_direction = self.view.inverse_transform_vector(&normalized);
 
