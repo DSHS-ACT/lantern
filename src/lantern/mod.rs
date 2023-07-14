@@ -1,5 +1,5 @@
 use bytemuck::cast_slice;
-use nalgebra::{SimdPartialOrd, Vector3, Vector4};
+use nalgebra::{Point3, SimdPartialOrd, Unit, Vector3, Vector4};
 use wgpu::{Device, Queue};
 use winit::dpi::PhysicalSize;
 
@@ -38,23 +38,15 @@ impl Lantern {
         self.final_image_data = vec![0; (new_size.width * new_size.height) as usize];
     }
 
-    pub fn update(&mut self, scene: &Scene, queue: &Queue, camera: &Camera) {
+    pub fn update(&mut self, scene: &Scene, camera: &Camera, queue: &Queue) {
         let size = self.final_image.size();
-
-        let origin = camera.position;
-        let mut ray = Ray {
-            origin,
-            direction: Default::default(),
-        };
 
         // 메모리 구조상 y 먼저가 더 효율적!
         for y in 0..size.height {
             for x in 0..size.width {
-                let index = ((y * size.width) + x) as usize;
-                ray.direction = camera.rays[index];
-
+                let index = ((y * self.final_image.size().width) + x) as usize;
                 self.final_image_data[index] = vec4_to_rgba(
-                    &self.trace_ray(scene, &ray)
+                    &self.per_pixel(scene, camera, x, y)
                         .simd_clamp(Vector4::zeros(), Vector4::new(1.0, 1.0, 1.0, 1.0))
                 );
             }
@@ -63,11 +55,45 @@ impl Lantern {
         self.final_image.load_image(queue, cast_slice(&self.final_image_data))
     }
 
-    pub fn trace_ray(&mut self, scene: &Scene, ray: &Ray) -> Vector4<f32> {
-        if scene.spheres.is_empty() {
-            return Vector4::zeros();
-        }
+    // DirectX의 RayGen 쉐이더와 같음
+    pub fn per_pixel(&mut self, scene: &Scene, camera: &Camera, x: u32, y: u32) -> Vector4::<f32> {
+        let index = ((y * self.final_image.size().width) + x) as usize;
 
+        let origin = camera.position;
+        let ray = Ray {
+            origin,
+            direction: camera.rays[index],
+        };
+        let Some(HitPayload { normal, sphere, .. }) =
+            self.trace_ray(&ray, scene) else { return Vector4::new(0.0, 0.0, 0.0, 1.0); };
+
+        let mut color = sphere.albedo;
+
+        let light_direction = Vector3::new(-1.0, -1.0, 1.0).normalize();
+
+        let intensity = normal.dot(&-light_direction).max(0.0); // cos(v1, v2) = v1 * v2 IF both normal
+        color *= intensity;
+
+        Vector4::new(color.x, color.y, color.z, 1.0)
+    }
+
+    pub fn closest_hit<'a>(&mut self, ray: &Ray, distance: f32, sphere: &'a Sphere) -> HitPayload<'a> {
+        let fake_origin = ray.origin - sphere.position;
+        let fake_position = fake_origin + (ray.direction * distance);
+
+        let mut normal = Unit::new_unchecked(fake_position.coords / sphere.radius);
+        normal.renormalize_fast();
+        let position = fake_position + sphere.position;
+
+        HitPayload {
+            distance,
+            position,
+            normal,
+            sphere,
+        }
+    }
+
+    pub fn trace_ray<'a>(&'a mut self, ray: &Ray, scene: &'a Scene) -> Option<HitPayload<'a>> {
         let mut closest: Option<(&Sphere, f32)> = None;
         for sphere in &scene.spheres {
             // a = 빔 시작
@@ -104,21 +130,18 @@ impl Lantern {
             }
         }
 
-        let Some((sphere, distance)) = closest else { return Vector4::new(0.0, 0.0, 0.0, 1.0); };
-
-        let origin = ray.origin - sphere.position;
-
-        let point = origin + (ray.direction * distance);
-        let normalized = point / sphere.radius;
-        let mut color = sphere.albedo;
-
-        let light_direction = Vector3::new(-1.0, -1.0, 1.0).normalize();
-        let flipped = -light_direction;
-
-        let intensity = flipped.dot(&normalized.coords).max(0.0); // cos(v1, v2) = v1 * v2 IF both normal
-        color *= intensity;
-
-        Vector4::new(color.x, color.y, color.z, 1.0)
+        closest.map(move |(sphere, distance)| {
+            self.closest_hit(ray, distance, sphere)
+        })
     }
+}
+
+// Cherno씨와 같은 디자인 선택, HitPayload는 빛의 경로에 대한 정보만 담고
+// 이를 이용해 색상을 알아내는건 나중에 함
+pub struct HitPayload<'a> {
+    distance: f32,
+    position: Point3<f32>,
+    normal: Unit<Vector3<f32>>,
+    sphere: &'a Sphere,
 }
 

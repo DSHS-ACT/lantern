@@ -95,6 +95,22 @@ impl Application {
             .await
             .unwrap();
 
+        let camera = Camera::new(45.0, 0.1, 100.0, size);
+        let scene = Scene {
+            spheres: vec![
+                Sphere {
+                    position: Vector3::new(4.0, 0.0, -3.0),
+                    radius: 1.5,
+                    albedo: Vector3::new(0.2, 0.3, 1.0),
+                },
+                Sphere {
+                    position: Vector3::zeros(),
+                    radius: 0.5,
+                    albedo: Vector3::new(1.0, 0.0, 1.0),
+                },
+            ],
+        };
+
         let lantern = Lantern::new(&device, size);
 
         // 해당 surface랑 adapter가 가진 기능들의 집합
@@ -220,21 +236,6 @@ impl Application {
             size_in_pixels: [config.width, config.height],
             pixels_per_point: egui_context.pixels_per_point(),
         };
-        let camera = Camera::new(45.0, 0.1, 100.0, size);
-        let scene = Scene {
-            spheres: vec![
-                Sphere {
-                    position: Vector3::new(4.0, 0.0, -3.0),
-                    radius: 1.5,
-                    albedo: Vector3::new(0.2, 0.3, 1.0),
-                },
-                Sphere {
-                    position: Vector3::zeros(),
-                    radius: 0.5,
-                    albedo: Vector3::new(1.0, 0.0, 1.0),
-                },
-            ],
-        };
 
         Self {
             surface,
@@ -292,7 +293,7 @@ impl Application {
 
     pub fn update(&mut self, frame_time: u128) {
         self.camera.update(frame_time);
-        self.lantern.update(&self.scene, &self.queue, &self.camera);
+        self.lantern.update(&self.scene, &self.camera, &self.queue);
 
         if self.camera.grab_mouse {
             let center = PhysicalPosition::new(self.size.width / 2, self.size.height / 2);
