@@ -1,5 +1,5 @@
 use bytemuck::cast_slice;
-use nalgebra::{Point3, SimdPartialOrd, Unit, Vector3, Vector4};
+use nalgebra::{Point3, Reflection3, SimdPartialOrd, Unit, Vector3, Vector4};
 use wgpu::{Device, Queue};
 use winit::dpi::PhysicalSize;
 
@@ -55,31 +55,51 @@ impl Lantern {
         self.final_image.load_image(queue, cast_slice(&self.final_image_data))
     }
 
+    const BOUNCE_LIMIT: usize = 2;
+
     // DirectX의 RayGen 쉐이더와 같음
     pub fn per_pixel(&mut self, scene: &Scene, camera: &Camera, x: u32, y: u32) -> Vector4::<f32> {
         let index = ((y * self.final_image.size().width) + x) as usize;
 
         let origin = camera.position;
-        let ray = Ray {
+        let mut ray = Ray {
             origin,
             direction: camera.rays[index],
         };
-        let Some(HitPayload { normal, sphere, .. }) =
-            self.trace_ray(&ray, scene) else { return Vector4::new(0.0, 0.0, 0.0, 1.0); };
 
-        let mut color = sphere.albedo;
+        // BOUNCE_LIMIT, multipler 다 무작위 값
+        let mut color = Vector3::zeros();
+        let mut multiplier = 1.0;
 
-        let light_direction = Vector3::new(-1.0, -1.0, 1.0).normalize();
+        for i in 0..Self::BOUNCE_LIMIT {
+            let Some(HitPayload { position, normal, sphere, .. }) = self.trace_ray(&ray, scene) else {
+                let sky = Vector3::zeros();
+                color += sky * multiplier;
+                break;
+            };
 
-        let intensity = normal.dot(&-light_direction).max(0.0); // cos(v1, v2) = v1 * v2 IF both normal
-        color *= intensity;
+            let mut sphere_color = sphere.albedo;
+
+            let light_direction = Vector3::new(-1.0, -1.0, 1.0).normalize();
+
+            let intensity = normal.dot(&-light_direction).max(0.0); // cos(v1, v2) = v1 * v2 IF both normal
+            sphere_color *= intensity;
+
+            color += sphere_color * multiplier;
+            multiplier *= 0.7;
+
+            // position 자체가 구에 접하기 때문에 position을 다음 레이 트레이싱에 바로 사용하면 제대로 안할 것임.
+            // 그래서 조금이라도 옮겨야 함
+            ray.origin = position + (normal.as_ref() * 0.0001);
+            Reflection3::new(normal, 0.0).reflect(ray.direction.as_mut_unchecked());
+        }
 
         Vector4::new(color.x, color.y, color.z, 1.0)
     }
 
     pub fn closest_hit<'a>(&mut self, ray: &Ray, distance: f32, sphere: &'a Sphere) -> HitPayload<'a> {
         let fake_origin = ray.origin - sphere.position;
-        let fake_position = fake_origin + (ray.direction * distance);
+        let fake_position = fake_origin + (ray.direction.as_ref() * distance);
 
         let mut normal = Unit::new_unchecked(fake_position.coords / sphere.radius);
         normal.renormalize_fast();

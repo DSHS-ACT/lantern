@@ -15,7 +15,7 @@ pub struct Camera {
     pub position: Point3<f32>,
     forward: Unit<Vector3<f32>>,
 
-    pub rays: Vec<Vector3<f32>>,
+    pub rays: Vec<Unit<Vector3<f32>>>,
     pub last_mouse: PhysicalPosition<f64>,
 
     viewport_size: PhysicalSize<u32>,
@@ -204,7 +204,9 @@ impl Camera {
                     normalized = -normalized;
                 }
 
-                let ray_direction = self.view.inverse_transform_vector(&normalized);
+                let ray_direction = Unit::new_unchecked(self.view.inverse_transform_vector(&normalized));
+
+                assert!(0.9 <= ray_direction.magnitude_squared() && ray_direction.magnitude_squared() <= 1.1);
 
                 new_rays.push(ray_direction);
             }
