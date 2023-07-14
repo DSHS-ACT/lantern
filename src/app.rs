@@ -2,7 +2,8 @@ use std::iter;
 use std::mem::size_of;
 
 use bytemuck::{Pod, Zeroable};
-use eframe::egui::{ClippedPrimitive, FontData, FontDefinitions, FontFamily, Label, Widget};
+use eframe::egui::{ClippedPrimitive, FontData, FontDefinitions, FontFamily, Label, Slider, Widget};
+use nalgebra::Vector3;
 use wgpu::{Backends, BindGroup, BindGroupDescriptor, BindGroupEntry, BindGroupLayoutDescriptor, BindGroupLayoutEntry, BindingType, BlendState, Buffer, BufferUsages, Color, ColorTargetState, ColorWrites, CommandEncoder, CommandEncoderDescriptor, CompositeAlphaMode, Device, DeviceDescriptor, Dx12Compiler, Face, Features, FragmentState, FrontFace, include_wgsl, IndexFormat, Instance, InstanceDescriptor, Limits, LoadOp, MultisampleState, Operations, PipelineLayoutDescriptor, PolygonMode, PowerPreference, PresentMode, PrimitiveState, PrimitiveTopology, Queue, RenderPassColorAttachment, RenderPassDescriptor, RenderPipeline, RenderPipelineDescriptor, RequestAdapterOptions, SamplerBindingType, ShaderStages, Surface, SurfaceConfiguration, SurfaceError, TextureSampleType, TextureUsages, TextureViewDescriptor, TextureViewDimension, vertex_attr_array, VertexAttribute, VertexBufferLayout, VertexState};
 use wgpu::BindingResource::{Sampler, TextureView};
 use wgpu::util::{BufferInitDescriptor, DeviceExt};
@@ -13,6 +14,7 @@ use winit::window::Window;
 
 use crate::camera::Camera;
 use crate::lantern::Lantern;
+use crate::lantern::scene::{Scene, Sphere};
 
 pub struct Application {
     surface: Surface,
@@ -32,7 +34,9 @@ pub struct Application {
     egui_renderer: egui_wgpu::Renderer,
     egui_screen: egui_wgpu::renderer::ScreenDescriptor,
     pub lantern: Lantern,
-    camera: Camera
+    camera: Camera,
+    scene: Scene,
+    current_sphere: usize,
 }
 
 impl Application {
@@ -126,7 +130,7 @@ impl Application {
         let index_buffer = device.create_buffer_init(&BufferInitDescriptor {
             label: Some("Index Buffer"),
             contents: bytemuck::cast_slice(INDICES),
-            usage: BufferUsages::INDEX
+            usage: BufferUsages::INDEX,
         });
 
         let blit_bind_group_layout = device.create_bind_group_layout(&BLIT_BIND_GROUP_LAYOUT);
@@ -148,7 +152,7 @@ impl Application {
         let main_pipeline_layout = device.create_pipeline_layout(&PipelineLayoutDescriptor {
             label: Some("Main Pipeline Layout"),
             bind_group_layouts: &[&blit_bind_group_layout],
-            push_constant_ranges: &[]
+            push_constant_ranges: &[],
         });
         let main_pipeline = device.create_render_pipeline(&RenderPipelineDescriptor {
             label: Some("Main Pipeline"),
@@ -156,7 +160,7 @@ impl Application {
             vertex: VertexState {
                 module: &shader,
                 entry_point: "vs_main",
-                buffers: &[Vertex::layout()]
+                buffers: &[Vertex::layout()],
             },
             fragment: Some(FragmentState {
                 module: &shader,
@@ -164,7 +168,7 @@ impl Application {
                 targets: &[Some(ColorTargetState {
                     format: config.format,
                     blend: Some(BlendState::ALPHA_BLENDING),
-                    write_mask: ColorWrites::ALL
+                    write_mask: ColorWrites::ALL,
                 })],
             }),
             primitive: PrimitiveState {
@@ -196,7 +200,7 @@ impl Application {
             // eframe의 FontData
             default.font_data.insert(
                 String::from("Nanum Gothic"),
-                FontData::from_static(include_bytes!("../NanumGothic.ttf"))
+                FontData::from_static(include_bytes!("../NanumGothic.ttf")),
             );
 
             // eframe::egui::FontFamily
@@ -210,13 +214,27 @@ impl Application {
             &device,
             surface_format,
             None, // 깊이 안씀
-            1 // 멀티 샘플링 1번만 할꺼임
+            1, // 멀티 샘플링 1번만 할꺼임
         );
         let egui_screen = egui_wgpu::renderer::ScreenDescriptor {
             size_in_pixels: [config.width, config.height],
             pixels_per_point: egui_context.pixels_per_point(),
         };
         let camera = Camera::new(45.0, 0.1, 100.0, size);
+        let scene = Scene {
+            spheres: vec![
+                Sphere {
+                    position: Vector3::new(4.0, 0.0, -3.0),
+                    radius: 1.5,
+                    albedo: Vector3::new(0.2, 0.3, 1.0),
+                },
+                Sphere {
+                    position: Vector3::zeros(),
+                    radius: 0.5,
+                    albedo: Vector3::new(1.0, 0.0, 1.0),
+                },
+            ],
+        };
 
         Self {
             surface,
@@ -236,6 +254,8 @@ impl Application {
             egui_screen,
             lantern,
             camera,
+            scene,
+            current_sphere: 0,
         }
     }
 
@@ -272,7 +292,7 @@ impl Application {
 
     pub fn update(&mut self, frame_time: u128) {
         self.camera.update(frame_time);
-        self.lantern.update(&self.queue, &self.camera);
+        self.lantern.update(&self.scene, &self.queue, &self.camera);
 
         if self.camera.grab_mouse {
             let center = PhysicalPosition::new(self.size.width / 2, self.size.height / 2);
@@ -318,11 +338,11 @@ impl Application {
                             r: 0.0,
                             g: 0.0,
                             b: 0.0,
-                            a: 1.0
+                            a: 1.0,
                         }),
                         // 처리한 색상을 위에서 지정한 view에 작성할지 말지 지정
                         // 우린 단색으로 도배하니 언제나 true로 설정
-                        store: true
+                        store: true,
                     },
                 })],
                 // 깊이맵, 스텐실은 아직 안쓰니 None
@@ -355,14 +375,16 @@ impl Application {
         if self.egui_state.on_event(&self.egui_context, event).consumed {
             return true;
         }
-        if let WindowEvent::MouseInput {
-                state: ElementState::Pressed, button: MouseButton::Right, ..
-            } = event {
-            self.show_egui = !self.show_egui;
-            return true
-        };
 
-        self.camera.input(event)
+        if let WindowEvent::MouseInput {
+            state: ElementState::Pressed, button: MouseButton::Right, ..
+        } = event {
+            self.show_egui = !self.show_egui;
+            return true;
+        };
+        let is_hovering = self.egui_context.is_pointer_over_area();
+
+        self.camera.input(event, is_hovering)
     }
 
     fn update_egui(&mut self, encoder: &mut CommandEncoder, frame_time: u128) -> Vec<ClippedPrimitive> {
@@ -374,6 +396,25 @@ impl Application {
                     Label::new(format!("프레임 처리 시간: {} ms", (frame_time)))
                         .wrap(false)
                         .ui(ui);
+
+                    if !self.scene.spheres.is_empty() {
+                        ui.menu_button("구체 선택", |ui| {
+                            for i in 0..self.scene.spheres.len() {
+                                ui.selectable_value(&mut self.current_sphere, i, format!("{}", i));
+                            }
+                        });
+                    };
+
+                    ui.label("위치:");
+                    Slider::new(&mut self.scene.spheres[self.current_sphere].position.x, -10.0..=10.0).step_by(0.05).drag_value_speed(0.1).ui(ui);
+                    Slider::new(&mut self.scene.spheres[self.current_sphere].position.y, -10.0..=10.0).step_by(0.05).drag_value_speed(0.1).ui(ui);
+                    Slider::new(&mut self.scene.spheres[self.current_sphere].position.z, -10.0..=10.0).step_by(0.05).drag_value_speed(0.1).ui(ui);
+
+                    ui.label("반지름:");
+                    Slider::new(&mut self.scene.spheres[self.current_sphere].radius, 0.0..=10.0).step_by(0.05).drag_value_speed(0.1).ui(ui);
+
+                    ui.label("Albedo:");
+                    ui.color_edit_button_rgb(&mut self.scene.spheres[self.current_sphere].albedo.data.0[0]);
                 });
         });
 
@@ -403,7 +444,7 @@ impl Vertex {
         VertexBufferLayout {
             array_stride: size_of::<Self>() as wgpu::BufferAddress,
             step_mode: wgpu::VertexStepMode::Vertex,
-            attributes: &Self::ATTRIBS
+            attributes: &Self::ATTRIBS,
         }
     }
 }

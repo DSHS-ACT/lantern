@@ -59,9 +59,9 @@ impl Camera {
         to_return
     }
 
-    pub fn input(&mut self, event: &WindowEvent) -> bool {
+    pub fn input(&mut self, event: &WindowEvent, is_hovering: bool) -> bool {
         match event {
-            WindowEvent::CursorMoved { position, .. } => {
+            WindowEvent::CursorMoved { position, .. } if !is_hovering => {
                 let delta = Vector2::new(
                     (position.x - self.last_mouse.x) as f32,
                     (position.y - self.last_mouse.y) as f32,
@@ -196,7 +196,13 @@ impl Camera {
 
                 let target = self.projection.inverse() * Vector4::new(coord.x, coord.y, 1.0,1.0);
                 // Frustum is right handed, z is inverted
-                let normalized = (target.xyz() / target.w).normalize();
+
+                //let normalized = (target.xyz() / target.w).normalize();
+                let mut normalized = target.xyz().normalize();
+
+                if target.w.is_sign_negative() {
+                    normalized = -normalized;
+                }
 
                 let ray_direction = self.view.inverse_transform_vector(&normalized);
 
