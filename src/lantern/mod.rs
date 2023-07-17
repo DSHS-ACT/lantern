@@ -1,5 +1,5 @@
 use bytemuck::cast_slice;
-use nalgebra::{Point3, Reflection3, SimdPartialOrd, Unit, Vector3, Vector4};
+use nalgebra::{Point3, Reflection3, Unit, Vector3, Vector4};
 use wgpu::{Device, Queue};
 use winit::dpi::PhysicalSize;
 
@@ -7,6 +7,7 @@ use crate::camera::Camera;
 use crate::lantern::ray::Ray;
 use crate::lantern::scene::{Scene, Sphere};
 use crate::lantern::texture::Image;
+use crate::util::random_vec;
 use crate::vec4_to_rgba;
 
 mod texture;
@@ -45,9 +46,10 @@ impl Lantern {
         for y in 0..size.height {
             for x in 0..size.width {
                 let index = ((y * self.final_image.size().width) + x) as usize;
+
+                let color = self.per_pixel(scene, camera, x, y);
                 self.final_image_data[index] = vec4_to_rgba(
-                    &self.per_pixel(scene, camera, x, y)
-                        .simd_clamp(Vector4::zeros(), Vector4::new(1.0, 1.0, 1.0, 1.0))
+                    &(color / color.max()) // Alpha가 언제나 1이니까 괜찮지 않을까?
                 );
             }
         }
@@ -71,27 +73,32 @@ impl Lantern {
         let mut color = Vector3::zeros();
         let mut multiplier = 1.0;
 
-        for i in 0..Self::BOUNCE_LIMIT {
+        for _ in 0..Self::BOUNCE_LIMIT {
             let Some(HitPayload { position, normal, sphere, .. }) = self.trace_ray(&ray, scene) else {
-                let sky = Vector3::zeros();
+                let sky = Vector3::new(0.6, 0.7, 0.9);
                 color += sky * multiplier;
                 break;
             };
 
-            let mut sphere_color = sphere.albedo;
+            let material = &scene.materials[sphere.material_index];
+            let mut sphere_color = material.albedo;
 
             let light_direction = Vector3::new(-1.0, -1.0, 1.0).normalize();
 
             let intensity = normal.dot(&-light_direction).max(0.0); // cos(v1, v2) = v1 * v2 IF both normal
             sphere_color *= intensity;
 
+            // 아랫줄 주석 처리하면 밝기 효과를 제대로 볼 수 있음
             color += sphere_color * multiplier;
             multiplier *= 0.7;
 
             // position 자체가 구에 접하기 때문에 position을 다음 레이 트레이싱에 바로 사용하면 제대로 안할 것임.
             // 그래서 조금이라도 옮겨야 함
             ray.origin = position + (normal.as_ref() * 0.0001);
-            Reflection3::new(normal, 0.0).reflect(ray.direction.as_mut_unchecked());
+            let reflection_axis = Unit::new_unchecked({
+                (normal.as_ref() + (material.roughness * random_vec(-0.5..0.5))).normalize()
+            });
+            Reflection3::new(reflection_axis, 0.0).reflect(ray.direction.as_mut_unchecked());
         }
 
         Vector4::new(color.x, color.y, color.z, 1.0)

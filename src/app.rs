@@ -2,7 +2,7 @@ use std::iter;
 use std::mem::size_of;
 
 use bytemuck::{Pod, Zeroable};
-use eframe::egui::{ClippedPrimitive, FontData, FontDefinitions, FontFamily, Label, Slider, Widget};
+use eframe::egui::{ClippedPrimitive, ComboBox, DragValue, FontData, FontDefinitions, FontFamily, Label, Widget};
 use nalgebra::Vector3;
 use wgpu::{Backends, BindGroup, BindGroupDescriptor, BindGroupEntry, BindGroupLayoutDescriptor, BindGroupLayoutEntry, BindingType, BlendState, Buffer, BufferUsages, Color, ColorTargetState, ColorWrites, CommandEncoder, CommandEncoderDescriptor, CompositeAlphaMode, Device, DeviceDescriptor, Dx12Compiler, Face, Features, FragmentState, FrontFace, include_wgsl, IndexFormat, Instance, InstanceDescriptor, Limits, LoadOp, MultisampleState, Operations, PipelineLayoutDescriptor, PolygonMode, PowerPreference, PresentMode, PrimitiveState, PrimitiveTopology, Queue, RenderPassColorAttachment, RenderPassDescriptor, RenderPipeline, RenderPipelineDescriptor, RequestAdapterOptions, SamplerBindingType, ShaderStages, Surface, SurfaceConfiguration, SurfaceError, TextureSampleType, TextureUsages, TextureViewDescriptor, TextureViewDimension, vertex_attr_array, VertexAttribute, VertexBufferLayout, VertexState};
 use wgpu::BindingResource::{Sampler, TextureView};
@@ -14,7 +14,7 @@ use winit::window::Window;
 
 use crate::camera::Camera;
 use crate::lantern::Lantern;
-use crate::lantern::scene::{Scene, Sphere};
+use crate::lantern::scene::{Material, Scene, Sphere};
 
 pub struct Application {
     surface: Surface,
@@ -36,7 +36,6 @@ pub struct Application {
     pub lantern: Lantern,
     camera: Camera,
     scene: Scene,
-    current_sphere: usize,
 }
 
 impl Application {
@@ -99,14 +98,24 @@ impl Application {
         let scene = Scene {
             spheres: vec![
                 Sphere {
-                    position: Vector3::new(4.0, 0.0, -3.0),
-                    radius: 1.5,
-                    albedo: Vector3::new(0.2, 0.3, 1.0),
+                    position: Vector3::new(0.0, -101.0, 0.0),
+                    radius: 100.0,
+                    material_index: 0,
                 },
                 Sphere {
                     position: Vector3::zeros(),
                     radius: 0.5,
+                    material_index: 1,
+                },
+            ],
+            materials: vec![
+                Material {
+                    albedo: Vector3::new(0.2, 0.3, 1.0),
+                    ..Material::default()
+                },
+                Material {
                     albedo: Vector3::new(1.0, 0.0, 1.0),
+                    ..Material::default()
                 },
             ],
         };
@@ -256,7 +265,6 @@ impl Application {
             lantern,
             camera,
             scene,
-            current_sphere: 0,
         }
     }
 
@@ -318,7 +326,11 @@ impl Application {
 
         // render_pass가 encoder를 빌려오기 때문에 아래처럼 따로 빼지 않으면 앞으로 계속 쓸 수 없음
         {
-            let primitives = self.update_egui(&mut encoder, frame_time);
+            let primitives = if self.show_egui {
+                self.update_egui(&mut encoder, frame_time)
+            } else {
+                vec![]
+            };
             let mut render_pass = encoder.begin_render_pass(&RenderPassDescriptor {
                 label: Some("Render Pass"),
                 // RenderpassColorAttachment: 해당 Render Pass에 가져다 붙일 색상을 지정함
@@ -398,24 +410,57 @@ impl Application {
                         .wrap(false)
                         .ui(ui);
 
-                    if !self.scene.spheres.is_empty() {
-                        ui.menu_button("구체 선택", |ui| {
-                            for i in 0..self.scene.spheres.len() {
-                                ui.selectable_value(&mut self.current_sphere, i, format!("{}", i));
-                            }
+                    // 이름 붙이기 귀찮으니 일단 인덱스를 이름처럼 쓰기
+                    ui.separator();
+                    self.scene.spheres.iter_mut().enumerate().for_each(|(idx, sphere)| {
+                        ui.collapsing(format!("구체 {idx}"), |ui| {
+                            ui.horizontal(|ui| {
+                                ui.label("위치:");
+                                DragValue::new(&mut sphere.position.x).ui(ui);
+                                DragValue::new(&mut sphere.position.y).ui(ui);
+                                DragValue::new(&mut sphere.position.z).ui(ui);
+                            });
+                            ui.horizontal(|ui| {
+                                ui.label("반지름:");
+                                DragValue::new(&mut sphere.radius).ui(ui);
+                            });
+                            ComboBox::from_label("Material")
+                                .selected_text(format!("Material {}", sphere.material_index))
+                                .wrap(false)
+                                .show_ui(ui, |ui| {
+                                    for i in 0..self.scene.materials.len() {
+                                        ui.selectable_value(&mut sphere.material_index, i, format!("Material {i}"));
+                                    }
+                                })
                         });
-                    };
+                    });
 
-                    ui.label("위치:");
-                    Slider::new(&mut self.scene.spheres[self.current_sphere].position.x, -10.0..=10.0).step_by(0.05).drag_value_speed(0.1).ui(ui);
-                    Slider::new(&mut self.scene.spheres[self.current_sphere].position.y, -10.0..=10.0).step_by(0.05).drag_value_speed(0.1).ui(ui);
-                    Slider::new(&mut self.scene.spheres[self.current_sphere].position.z, -10.0..=10.0).step_by(0.05).drag_value_speed(0.1).ui(ui);
-
-                    ui.label("반지름:");
-                    Slider::new(&mut self.scene.spheres[self.current_sphere].radius, 0.0..=10.0).step_by(0.05).drag_value_speed(0.1).ui(ui);
-
-                    ui.label("Albedo:");
-                    ui.color_edit_button_rgb(&mut self.scene.spheres[self.current_sphere].albedo.data.0[0]);
+                    ui.separator();
+                    self.scene.materials.iter_mut().enumerate().for_each(|(idx, material)| {
+                        ui.collapsing(format!("Material {idx}"), |ui| {
+                            ui.horizontal(|ui| {
+                                ui.label("Metallic:");
+                                // 양수로 범위 제한
+                                DragValue::new(&mut material.metallic)
+                                    .max_decimals(4)
+                                    .clamp_range(0.0..=1.0)
+                                    .speed(0.05)
+                                    .ui(ui);
+                            });
+                            ui.horizontal(|ui| {
+                                ui.label("Roughness:");
+                                // 양수로 범위 제한
+                                DragValue::new(&mut material.roughness)
+                                    .speed(0.05)
+                                    .clamp_range(0.0..=1.0)
+                                    .ui(ui);
+                            });
+                            ui.horizontal(|ui| {
+                                ui.label("Albedo:");
+                                ui.color_edit_button_rgb(&mut material.albedo.data.0[0]);
+                            });
+                        });
+                    })
                 });
         });
 
