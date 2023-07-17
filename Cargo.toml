@@ -21,6 +21,7 @@ cfg-if = "1.0.0"
 rand = "0.8.5"
 bytemuck = "1.13.1"
 nalgebra = "0.32.3"
+rayon = "1.7.0"
 
 [dependencies.image]
 version = "0.24.6"

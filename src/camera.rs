@@ -1,8 +1,12 @@
 use std::ops::Add;
+use std::sync::mpsc;
+use std::sync::mpsc::{Receiver, Sender};
 
 use nalgebra::{Isometry3, Matrix4, Perspective3, Point3, Unit, UnitQuaternion, Vector2, Vector3, Vector4};
+use rayon::prelude::*;
 use winit::dpi::{PhysicalPosition, PhysicalSize};
 use winit::event::{ElementState, KeyboardInput, VirtualKeyCode, WindowEvent};
+use crate::SharePtr;
 
 pub struct Camera {
     projection: Perspective3<f32>,
@@ -185,10 +189,12 @@ impl Camera {
     }
 
     fn reevaluate_rays(&mut self) {
-        let mut new_rays = Vec::with_capacity((self.viewport_size.width * self.viewport_size.height) as usize);
+        let mut new_rays = vec![Vector3::x_axis(); (self.viewport_size.width * self.viewport_size.height) as usize];
+        let ptr = SharePtr(new_rays.as_mut_ptr());
 
-        for y in 0..self.viewport_size.height {
-            for x in 0..self.viewport_size.width {
+        (0..self.viewport_size.height).into_par_iter().for_each(|y| {
+            (0..self.viewport_size.width).for_each(|x| unsafe {
+                let _ = &ptr;
                 let mut coord = Vector2::new(
                     x as f32 / self.viewport_size.width as f32,
                     y as f32 / self.viewport_size.height as f32,
@@ -210,9 +216,10 @@ impl Camera {
 
                 assert!(0.9 <= ray_direction.magnitude_squared() && ray_direction.magnitude_squared() <= 1.1);
 
-                new_rays.push(ray_direction);
-            }
-        }
+                let index = y * self.viewport_size.width + x;
+                *ptr.0.offset(index as isize).as_mut().unwrap() = ray_direction;
+            })
+        });
 
         self.rays = new_rays;
     }
