@@ -1,3 +1,4 @@
+use std::ptr;
 use bytemuck::cast_slice;
 use nalgebra::{Point3, Reflection3, Unit, Vector3, Vector4};
 use wgpu::{Device, Queue};
@@ -14,19 +15,38 @@ mod texture;
 mod ray;
 pub mod scene;
 
+pub struct Settings {
+    pub should_accumulate: bool
+}
+
+impl Default for Settings {
+    fn default() -> Self {
+        Self {
+            should_accumulate: true,
+        }
+    }
+}
+
 pub struct Lantern {
     pub final_image: Image,
     pub final_image_data: Vec<u32>,
+    path_acc: Vec<Vector4<f32>>,
+    acc_counter: u32,
+    pub settings: Settings
 }
 
 impl Lantern {
     pub fn new(device: &Device, viewport_size: PhysicalSize<u32>) -> Self {
         let final_image = Image::new(device, viewport_size.width, viewport_size.height, "Lantern Output");
         let final_image_data = vec![0; (viewport_size.width * viewport_size.height) as usize];
+        let path_acc = vec![Vector4::zeros(); (viewport_size.width * viewport_size.height) as usize];
 
         Self {
             final_image,
             final_image_data,
+            path_acc,
+            acc_counter: 1,
+            settings: Default::default(),
         }
     }
 
@@ -37,10 +57,17 @@ impl Lantern {
 
         self.final_image.resize(device, new_size);
         self.final_image_data = vec![0; (new_size.width * new_size.height) as usize];
+        self.path_acc = vec![Vector4::zeros(); (new_size.width * new_size.height) as usize];
     }
 
     pub fn update(&mut self, scene: &Scene, camera: &Camera, queue: &Queue) {
         let size = self.final_image.size();
+        if self.acc_counter == 1 {
+            unsafe {
+                let paths = self.path_acc.as_mut_ptr();
+                ptr::write_bytes(paths, 0x00, self.path_acc.capacity());
+            }
+        }
 
         // 메모리 구조상 y 먼저가 더 효율적!
         for y in 0..size.height {
@@ -48,13 +75,27 @@ impl Lantern {
                 let index = ((y * self.final_image.size().width) + x) as usize;
 
                 let color = self.per_pixel(scene, camera, x, y);
+                self.path_acc[index] += color;
+
+                let accumulated = self.path_acc[index] / (self.acc_counter as f32);
+
                 self.final_image_data[index] = vec4_to_rgba(
-                    &(color / color.max()) // Alpha가 언제나 1이니까 괜찮지 않을까?
+                    &(accumulated / accumulated.max()) // Alpha가 언제나 1이니까 괜찮지 않을까?
                 );
             }
         }
 
-        self.final_image.load_image(queue, cast_slice(&self.final_image_data))
+        self.final_image.load_image(queue, cast_slice(&self.final_image_data));
+
+        if self.settings.should_accumulate {
+            self.acc_counter += 1;
+        } else {
+            self.acc_counter = 1;
+        }
+    }
+
+    pub fn reset_counter(&mut self) {
+        self.acc_counter = 1;
     }
 
     const BOUNCE_LIMIT: usize = 2;

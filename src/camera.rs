@@ -115,7 +115,7 @@ impl Camera {
         }
     }
 
-    pub fn update(&mut self, frame_time: u128) {
+    pub fn update(&mut self, frame_time: u128) -> bool {
         let time_step = ((frame_time as f32) / 1000.0).min(1.0 / 60.0);
 
         let up: Unit<Vector3<f32>> = Vector3::y_axis();
@@ -150,7 +150,9 @@ impl Camera {
         if moved {
             self.reevaluate_view();
             self.reevaluate_rays();
-        }
+        };
+
+        moved
     }
 
     pub fn resize(&mut self, new_size: PhysicalSize<u32>) {

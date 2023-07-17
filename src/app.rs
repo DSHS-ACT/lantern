@@ -9,6 +9,7 @@ use wgpu::BindingResource::{Sampler, TextureView};
 use wgpu::util::{BufferInitDescriptor, DeviceExt};
 use winit::dpi::{PhysicalPosition, PhysicalSize};
 use winit::event::{ElementState, MouseButton, WindowEvent};
+use winit::event::WindowEvent::CursorMoved;
 use winit::event_loop::EventLoop;
 use winit::window::Window;
 
@@ -300,7 +301,9 @@ impl Application {
     }
 
     pub fn update(&mut self, frame_time: u128) {
-        self.camera.update(frame_time);
+        if self.camera.update(frame_time) {
+            self.lantern.reset_counter();
+        }
         self.lantern.update(&self.scene, &self.camera, &self.queue);
 
         if self.camera.grab_mouse {
@@ -397,7 +400,15 @@ impl Application {
         };
         let is_hovering = self.egui_context.is_pointer_over_area();
 
-        self.camera.input(event, is_hovering)
+        let has_camera_consumed = self.camera.input(event, is_hovering);
+
+        if has_camera_consumed {
+            if let CursorMoved { .. } = event {
+                self.lantern.reset_counter();
+            };
+        };
+
+        has_camera_consumed
     }
 
     fn update_egui(&mut self, encoder: &mut CommandEncoder, frame_time: u128) -> Vec<ClippedPrimitive> {
@@ -409,6 +420,11 @@ impl Application {
                     Label::new(format!("프레임 처리 시간: {} ms", (frame_time)))
                         .wrap(false)
                         .ui(ui);
+                    ui.checkbox(&mut self.lantern.settings.should_accumulate, "Accumulate?");
+
+                    if ui.button("Reset").clicked() {
+                        self.lantern.reset_counter();
+                    }
 
                     // 이름 붙이기 귀찮으니 일단 인덱스를 이름처럼 쓰기
                     ui.separator();
@@ -460,7 +476,7 @@ impl Application {
                                 ui.color_edit_button_rgb(&mut material.albedo.data.0[0]);
                             });
                         });
-                    })
+                    });
                 });
         });
 
