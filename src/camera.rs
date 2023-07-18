@@ -1,12 +1,9 @@
 use std::ops::Add;
-use std::sync::mpsc;
-use std::sync::mpsc::{Receiver, Sender};
 
 use nalgebra::{Isometry3, Matrix4, Perspective3, Point3, Unit, UnitQuaternion, Vector2, Vector3, Vector4};
 use rayon::prelude::*;
 use winit::dpi::{PhysicalPosition, PhysicalSize};
 use winit::event::{ElementState, KeyboardInput, VirtualKeyCode, WindowEvent};
-use crate::SharePtr;
 
 pub struct Camera {
     projection: Perspective3<f32>,
@@ -41,6 +38,8 @@ impl Camera {
         let position = Point3::from([0.0, 0.0, -1.0]);
         let forward = Vector3::z_axis();
         let target = position.add(&forward.into_inner());
+        let mut rays = Vec::with_capacity((viewport_size.width * viewport_size.height) as usize);
+        unsafe { rays.set_len(rays.capacity()) };
         let view = Isometry3::look_at_lh(&position, &target, &Vector3::y_axis());
 
         let mut to_return = Self {
@@ -51,7 +50,7 @@ impl Camera {
             far,
             position,
             forward,
-            rays: vec![],
+            rays,
             last_mouse: Default::default(),
             viewport_size,
             inputs: [false; 6],
@@ -189,38 +188,33 @@ impl Camera {
     }
 
     fn reevaluate_rays(&mut self) {
-        let mut new_rays = vec![Vector3::x_axis(); (self.viewport_size.width * self.viewport_size.height) as usize];
-        let ptr = SharePtr(new_rays.as_mut_ptr());
+        self.rays.clear();
+        unsafe { self.rays.set_len((self.viewport_size.width * self.viewport_size.height) as usize); }
 
-        (0..self.viewport_size.height).into_par_iter().for_each(|y| {
-            (0..self.viewport_size.width).for_each(|x| unsafe {
-                let _ = &ptr;
-                let mut coord = Vector2::new(
-                    x as f32 / self.viewport_size.width as f32,
-                    y as f32 / self.viewport_size.height as f32,
-                );
-                coord *= 2.0;
-                coord -= Vector2::new(1.0, 1.0);
+        self.rays.par_iter_mut().enumerate().for_each(|(index ,ray_direction)| {
+            let y = index as u32 / self.viewport_size.width;
+            let x = index as u32 % self.viewport_size.width;
 
-                let target = self.projection.inverse() * Vector4::new(coord.x, coord.y, 1.0,1.0);
-                // Frustum is right handed, z is inverted
+            let mut coord = Vector2::new(
+                x as f32 / self.viewport_size.width as f32,
+                y as f32 / self.viewport_size.height as f32,
+            );
+            coord *= 2.0;
+            coord -= Vector2::new(1.0, 1.0);
 
-                //let normalized = (target.xyz() / target.w).normalize();
-                let mut normalized = target.xyz().normalize();
+            let target = self.projection.inverse() * Vector4::new(coord.x, coord.y, 1.0,1.0);
+            // Frustum is right handed, z is inverted
 
-                if target.w.is_sign_negative() {
-                    normalized = -normalized;
-                }
+            //let normalized = (target.xyz() / target.w).normalize();
+            let mut normalized = target.xyz().normalize();
 
-                let ray_direction = Unit::new_unchecked(self.view.inverse_transform_vector(&normalized));
+            if target.w.is_sign_negative() {
+                normalized = -normalized;
+            }
 
-                assert!(0.9 <= ray_direction.magnitude_squared() && ray_direction.magnitude_squared() <= 1.1);
+            *ray_direction = Unit::new_unchecked(self.view.inverse_transform_vector(&normalized));
 
-                let index = y * self.viewport_size.width + x;
-                *ptr.0.offset(index as isize).as_mut().unwrap() = ray_direction;
-            })
+            assert!(0.9 <= ray_direction.magnitude_squared() && ray_direction.magnitude_squared() <= 1.1);
         });
-
-        self.rays = new_rays;
     }
 }

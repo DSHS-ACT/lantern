@@ -150,7 +150,3 @@ fn now() -> u128 {
 
     since_epoch.as_millis()
 }
-
-struct SharePtr<T>(*mut T);
-unsafe impl<T: Sync> Sync for SharePtr<T> {}
-

@@ -11,7 +11,7 @@ use crate::lantern::ray::Ray;
 use crate::lantern::scene::{Scene, Sphere};
 use crate::lantern::texture::Image;
 use crate::util::random_vec;
-use crate::{SharePtr, vec4_to_rgba};
+use crate::vec4_to_rgba;
 
 mod texture;
 mod ray;
@@ -63,7 +63,6 @@ impl Lantern {
     }
 
     pub fn update(&mut self, scene: &Scene, camera: &Camera, queue: &Queue) {
-        let size = self.final_image.size();
         if self.acc_counter == 1 {
             unsafe {
                 let paths = self.path_acc.as_mut_ptr();
@@ -71,30 +70,17 @@ impl Lantern {
             }
         }
 
-        unsafe {
-            let path_ptr = SharePtr(self.path_acc.as_mut_ptr());
-            let image_ptr = SharePtr(self.final_image_data.as_mut_ptr());
+        self.path_acc.par_iter_mut().zip(self.final_image_data.par_iter_mut()).enumerate().for_each(|(index, (path, data))| {
+            let color = Self::per_pixel(scene, camera, index);
 
-            (0..size.height).into_par_iter().for_each(|y| {
-                let _ = &path_ptr;
-                let _ = &image_ptr;
+            *path += color;
 
-                for x in 0..size.width {
-                    let index = ((y * self.final_image.size().width) + x) as isize;
+            let accumulated = *path / (self.acc_counter as f32);
 
-                    let color = self.per_pixel(scene, camera, x, y);
-
-                    let path_ref = path_ptr.0.offset(index).as_mut().unwrap();
-                    *path_ref += color;
-
-                    let accumulated = *path_ref / (self.acc_counter as f32);
-
-                    *image_ptr.0.offset(index).as_mut().unwrap() = vec4_to_rgba(
-                        &(accumulated / accumulated.max()) // Alpha가 언제나 1이니까 괜찮지 않을까?
-                    );
-                }
-            });
-        }
+            *data = vec4_to_rgba(
+                &(accumulated / accumulated.max()) // Alpha가 언제나 1이니까 괜찮지 않을까?
+            );
+        });
 
         self.final_image.load_image(queue, cast_slice(&self.final_image_data));
 
@@ -112,9 +98,7 @@ impl Lantern {
     const BOUNCE_LIMIT: usize = 2;
 
     // DirectX의 RayGen 쉐이더와 같음
-    pub fn per_pixel(&self, scene: &Scene, camera: &Camera, x: u32, y: u32) -> Vector4::<f32> {
-        let index = ((y * self.final_image.size().width) + x) as usize;
-
+    pub fn per_pixel(scene: &Scene, camera: &Camera, index: usize) -> Vector4::<f32> {
         let origin = camera.position;
         let mut ray = Ray {
             origin,
@@ -126,7 +110,7 @@ impl Lantern {
         let mut multiplier = 1.0;
 
         for _ in 0..Self::BOUNCE_LIMIT {
-            let Some(HitPayload { position, normal, sphere, .. }) = self.trace_ray(&ray, scene) else {
+            let Some(HitPayload { position, normal, sphere, .. }) = Self::trace_ray(&ray, scene) else {
                 let sky = Vector3::new(0.6, 0.7, 0.9);
                 color += sky * multiplier;
                 break;
@@ -156,7 +140,7 @@ impl Lantern {
         Vector4::new(color.x, color.y, color.z, 1.0)
     }
 
-    pub fn closest_hit<'a>(&self, ray: &Ray, distance: f32, sphere: &'a Sphere) -> HitPayload<'a> {
+    pub fn closest_hit<'a>(ray: &Ray, distance: f32, sphere: &'a Sphere) -> HitPayload<'a> {
         let fake_origin = ray.origin - sphere.position;
         let fake_position = fake_origin + (ray.direction.as_ref() * distance);
 
@@ -172,7 +156,7 @@ impl Lantern {
         }
     }
 
-    pub fn trace_ray<'a>(&'a self, ray: &Ray, scene: &'a Scene) -> Option<HitPayload<'a>> {
+    pub fn trace_ray<'a>(ray: &Ray, scene: &'a Scene) -> Option<HitPayload<'a>> {
         let mut closest: Option<(&Sphere, f32)> = None;
         for sphere in &scene.spheres {
             // a = 빔 시작
@@ -210,7 +194,7 @@ impl Lantern {
         }
 
         closest.map(move |(sphere, distance)| {
-            self.closest_hit(ray, distance, sphere)
+            Self::closest_hit(ray, distance, sphere)
         })
     }
 }
