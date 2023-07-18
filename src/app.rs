@@ -2,20 +2,33 @@ use std::iter;
 use std::mem::size_of;
 
 use bytemuck::{Pod, Zeroable};
-use eframe::egui::{ClippedPrimitive, ComboBox, DragValue, FontData, FontDefinitions, FontFamily, Label, Widget};
+use eframe::egui::{
+    ClippedPrimitive, ComboBox, DragValue, FontData, FontDefinitions, FontFamily, Label, Widget,
+};
 use nalgebra::Vector3;
-use wgpu::{Backends, BindGroup, BindGroupDescriptor, BindGroupEntry, BindGroupLayoutDescriptor, BindGroupLayoutEntry, BindingType, BlendState, Buffer, BufferUsages, Color, ColorTargetState, ColorWrites, CommandEncoder, CommandEncoderDescriptor, CompositeAlphaMode, Device, DeviceDescriptor, Dx12Compiler, Face, Features, FragmentState, FrontFace, include_wgsl, IndexFormat, Instance, InstanceDescriptor, Limits, LoadOp, MultisampleState, Operations, PipelineLayoutDescriptor, PolygonMode, PowerPreference, PresentMode, PrimitiveState, PrimitiveTopology, Queue, RenderPassColorAttachment, RenderPassDescriptor, RenderPipeline, RenderPipelineDescriptor, RequestAdapterOptions, SamplerBindingType, ShaderStages, Surface, SurfaceConfiguration, SurfaceError, TextureSampleType, TextureUsages, TextureViewDescriptor, TextureViewDimension, vertex_attr_array, VertexAttribute, VertexBufferLayout, VertexState};
-use wgpu::BindingResource::{Sampler, TextureView};
 use wgpu::util::{BufferInitDescriptor, DeviceExt};
+use wgpu::BindingResource::{Sampler, TextureView};
+use wgpu::{
+    include_wgsl, vertex_attr_array, Backends, BindGroup, BindGroupDescriptor, BindGroupEntry,
+    BindGroupLayoutDescriptor, BindGroupLayoutEntry, BindingType, BlendState, Buffer, BufferUsages,
+    Color, ColorTargetState, ColorWrites, CommandEncoder, CommandEncoderDescriptor,
+    CompositeAlphaMode, Device, DeviceDescriptor, Dx12Compiler, Face, Features, FragmentState,
+    FrontFace, IndexFormat, Instance, InstanceDescriptor, Limits, LoadOp, MultisampleState,
+    Operations, PipelineLayoutDescriptor, PolygonMode, PowerPreference, PresentMode,
+    PrimitiveState, PrimitiveTopology, Queue, RenderPassColorAttachment, RenderPassDescriptor,
+    RenderPipeline, RenderPipelineDescriptor, RequestAdapterOptions, SamplerBindingType,
+    ShaderStages, Surface, SurfaceConfiguration, SurfaceError, TextureSampleType, TextureUsages,
+    TextureViewDescriptor, TextureViewDimension, VertexAttribute, VertexBufferLayout, VertexState,
+};
 use winit::dpi::{PhysicalPosition, PhysicalSize};
-use winit::event::{ElementState, MouseButton, WindowEvent};
 use winit::event::WindowEvent::CursorMoved;
+use winit::event::{ElementState, MouseButton, WindowEvent};
 use winit::event_loop::EventLoop;
 use winit::window::Window;
 
 use crate::camera::Camera;
-use crate::lantern::Lantern;
 use crate::lantern::scene::{Material, Scene, Sphere};
+use crate::lantern::Lantern;
 
 pub struct Application {
     surface: Surface,
@@ -48,7 +61,7 @@ impl Application {
         // 백엔드: Vulkan, Metal, DirectX 등등
         // 아래 메서드를 호출하면 아무 백엔드나 상관 없는 instnace를 요청함
         let instance = Instance::new(InstanceDescriptor {
-            backends: Backends::all(),                // 모든 종류의 백엔드 허용
+            backends: Backends::all(),                     // 모든 종류의 백엔드 허용
             dx12_shader_compiler: Dx12Compiler::default(), // DirectX 사용시, 쉐이더 컴파일러로 FXC 사용
         });
 
@@ -142,7 +155,7 @@ impl Application {
             present_mode: PresentMode::AutoVsync, // 렌더링된 결과물이랑 모니터에 물리적으로 표시된거랑 어떻게 동기화 할지 결정
             alpha_mode: CompositeAlphaMode::Auto, // 알파값을 이용한 투명도 연산 방법 지정. 자동으로 설정하게 함.
             view_formats: vec![], // 아래 get_current_texture 호출 시 사용할 수도 있는 대체 텍스쳐 포맷들.
-            // 그런거 없으니 빈 벡터 사용.
+                                  // 그런거 없으니 빈 벡터 사용.
         };
         surface.configure(&device, &config);
 
@@ -171,7 +184,7 @@ impl Application {
                 BindGroupEntry {
                     binding: 1,
                     resource: Sampler(&lantern.final_image.sampler),
-                }
+                },
             ],
         });
 
@@ -230,7 +243,9 @@ impl Application {
             );
 
             // eframe::egui::FontFamily
-            default.families.insert(FontFamily::Proportional, vec![String::from("Nanum Gothic")]);
+            default
+                .families
+                .insert(FontFamily::Proportional, vec![String::from("Nanum Gothic")]);
 
             default
         };
@@ -240,7 +255,7 @@ impl Application {
             &device,
             surface_format,
             None, // 깊이 안씀
-            1, // 멀티 샘플링 1번만 할꺼임
+            1,    // 멀티 샘플링 1번만 할꺼임
         );
         let egui_screen = egui_wgpu::renderer::ScreenDescriptor {
             size_in_pixels: [config.width, config.height],
@@ -286,7 +301,9 @@ impl Application {
 
         self.blit_bind_group = self.device.create_bind_group(&BindGroupDescriptor {
             label: Some("Blit Bind Group"),
-            layout: &self.device.create_bind_group_layout(&BLIT_BIND_GROUP_LAYOUT),
+            layout: &self
+                .device
+                .create_bind_group_layout(&BLIT_BIND_GROUP_LAYOUT),
             entries: &[
                 BindGroupEntry {
                     binding: 0,
@@ -295,7 +312,7 @@ impl Application {
                 BindGroupEntry {
                     binding: 1,
                     resource: Sampler(&self.lantern.final_image.sampler),
-                }
+                },
             ],
         });
     }
@@ -321,11 +338,15 @@ impl Application {
         let output = self.surface.get_current_texture()?; // 렌더링 결과를 출력할 곳
 
         // view는 위에서 가져온 output을 다뤄주는 것임.
-        let view = output.texture.create_view(&TextureViewDescriptor::default());
+        let view = output
+            .texture
+            .create_view(&TextureViewDescriptor::default());
         // encoder는 GPU에 보내는 명령들을 임시적으로 저장하는 것
-        let mut encoder = self.device.create_command_encoder(&CommandEncoderDescriptor {
-            label: Some("Encoder"),
-        });
+        let mut encoder = self
+            .device
+            .create_command_encoder(&CommandEncoderDescriptor {
+                label: Some("Encoder"),
+            });
 
         // render_pass가 encoder를 빌려오기 때문에 아래처럼 따로 빼지 않으면 앞으로 계속 쓸 수 없음
         {
@@ -372,7 +393,8 @@ impl Application {
             render_pass.draw_indexed(0..6, 0, 0..1);
 
             if self.show_egui {
-                self.egui_renderer.render(&mut render_pass, &primitives, &self.egui_screen)
+                self.egui_renderer
+                    .render(&mut render_pass, &primitives, &self.egui_screen)
             }
         }
 
@@ -393,8 +415,11 @@ impl Application {
         }
 
         if let WindowEvent::MouseInput {
-            state: ElementState::Pressed, button: MouseButton::Right, ..
-        } = event {
+            state: ElementState::Pressed,
+            button: MouseButton::Right,
+            ..
+        } = event
+        {
             self.show_egui = !self.show_egui;
             return true;
         };
@@ -411,7 +436,11 @@ impl Application {
         has_camera_consumed
     }
 
-    fn update_egui(&mut self, encoder: &mut CommandEncoder, frame_time: u128) -> Vec<ClippedPrimitive> {
+    fn update_egui(
+        &mut self,
+        encoder: &mut CommandEncoder,
+        frame_time: u128,
+    ) -> Vec<ClippedPrimitive> {
         let egui_input = self.egui_state.take_egui_input(&self.window);
         let egui_output = self.egui_context.run(egui_input, |ctx| {
             eframe::egui::Window::new("설정")
@@ -428,65 +457,92 @@ impl Application {
 
                     // 이름 붙이기 귀찮으니 일단 인덱스를 이름처럼 쓰기
                     ui.separator();
-                    self.scene.spheres.iter_mut().enumerate().for_each(|(idx, sphere)| {
-                        ui.collapsing(format!("구체 {idx}"), |ui| {
-                            ui.horizontal(|ui| {
-                                ui.label("위치:");
-                                DragValue::new(&mut sphere.position.x).ui(ui);
-                                DragValue::new(&mut sphere.position.y).ui(ui);
-                                DragValue::new(&mut sphere.position.z).ui(ui);
+                    self.scene
+                        .spheres
+                        .iter_mut()
+                        .enumerate()
+                        .for_each(|(idx, sphere)| {
+                            ui.collapsing(format!("구체 {idx}"), |ui| {
+                                ui.horizontal(|ui| {
+                                    ui.label("위치:");
+                                    DragValue::new(&mut sphere.position.x).ui(ui);
+                                    DragValue::new(&mut sphere.position.y).ui(ui);
+                                    DragValue::new(&mut sphere.position.z).ui(ui);
+                                });
+                                ui.horizontal(|ui| {
+                                    ui.label("반지름:");
+                                    DragValue::new(&mut sphere.radius).ui(ui);
+                                });
+                                ComboBox::from_label("Material")
+                                    .selected_text(format!("Material {}", sphere.material_index))
+                                    .wrap(false)
+                                    .show_ui(ui, |ui| {
+                                        for i in 0..self.scene.materials.len() {
+                                            ui.selectable_value(
+                                                &mut sphere.material_index,
+                                                i,
+                                                format!("Material {i}"),
+                                            );
+                                        }
+                                    })
                             });
-                            ui.horizontal(|ui| {
-                                ui.label("반지름:");
-                                DragValue::new(&mut sphere.radius).ui(ui);
-                            });
-                            ComboBox::from_label("Material")
-                                .selected_text(format!("Material {}", sphere.material_index))
-                                .wrap(false)
-                                .show_ui(ui, |ui| {
-                                    for i in 0..self.scene.materials.len() {
-                                        ui.selectable_value(&mut sphere.material_index, i, format!("Material {i}"));
-                                    }
-                                })
                         });
-                    });
 
                     ui.separator();
-                    self.scene.materials.iter_mut().enumerate().for_each(|(idx, material)| {
-                        ui.collapsing(format!("Material {idx}"), |ui| {
-                            ui.horizontal(|ui| {
-                                ui.label("Metallic:");
-                                // 양수로 범위 제한
-                                DragValue::new(&mut material.metallic)
-                                    .max_decimals(4)
-                                    .clamp_range(0.0..=1.0)
-                                    .speed(0.05)
-                                    .ui(ui);
-                            });
-                            ui.horizontal(|ui| {
-                                ui.label("Roughness:");
-                                // 양수로 범위 제한
-                                DragValue::new(&mut material.roughness)
-                                    .speed(0.05)
-                                    .clamp_range(0.0..=1.0)
-                                    .ui(ui);
-                            });
-                            ui.horizontal(|ui| {
-                                ui.label("Albedo:");
-                                ui.color_edit_button_rgb(&mut material.albedo.data.0[0]);
+                    self.scene
+                        .materials
+                        .iter_mut()
+                        .enumerate()
+                        .for_each(|(idx, material)| {
+                            ui.collapsing(format!("Material {idx}"), |ui| {
+                                ui.horizontal(|ui| {
+                                    ui.label("Metallic:");
+                                    // 양수로 범위 제한
+                                    DragValue::new(&mut material.metallic)
+                                        .max_decimals(4)
+                                        .clamp_range(0.0..=1.0)
+                                        .speed(0.05)
+                                        .ui(ui);
+                                });
+                                ui.horizontal(|ui| {
+                                    ui.label("Roughness:");
+                                    // 양수로 범위 제한
+                                    DragValue::new(&mut material.roughness)
+                                        .speed(0.05)
+                                        .clamp_range(0.0..=1.0)
+                                        .ui(ui);
+                                });
+                                ui.horizontal(|ui| {
+                                    ui.label("Albedo:");
+                                    ui.color_edit_button_rgb(&mut material.albedo.data.0[0]);
+                                });
                             });
                         });
-                    });
                 });
         });
 
-        self.egui_state.handle_platform_output(&self.window, &self.egui_context, egui_output.platform_output);
+        self.egui_state.handle_platform_output(
+            &self.window,
+            &self.egui_context,
+            egui_output.platform_output,
+        );
         let primitives = self.egui_context.tessellate(egui_output.shapes);
-        egui_output.textures_delta.set.iter().for_each(|(id, delta)| {
-            self.egui_renderer.update_texture(&self.device, &self.queue, *id, delta);
-        });
+        egui_output
+            .textures_delta
+            .set
+            .iter()
+            .for_each(|(id, delta)| {
+                self.egui_renderer
+                    .update_texture(&self.device, &self.queue, *id, delta);
+            });
 
-        self.egui_renderer.update_buffers(&self.device, &self.queue, encoder, &primitives, &self.egui_screen);
+        self.egui_renderer.update_buffers(
+            &self.device,
+            &self.queue,
+            encoder,
+            &primitives,
+            &self.egui_screen,
+        );
 
         primitives
     }
@@ -529,7 +585,7 @@ const BLIT_BIND_GROUP_LAYOUT: BindGroupLayoutDescriptor = BindGroupLayoutDescrip
             visibility: ShaderStages::FRAGMENT,
             ty: BindingType::Sampler(SamplerBindingType::Filtering),
             count: None,
-        }
+        },
     ],
 };
 

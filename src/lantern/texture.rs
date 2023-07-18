@@ -4,14 +4,18 @@ use std::io::BufReader;
 use std::path::Path;
 
 use image::ImageFormat;
-use wgpu::{Device, Extent3d, FilterMode, ImageCopyTexture, ImageDataLayout, Origin3d, Queue, Sampler, SamplerDescriptor, Texture, TextureAspect, TextureDescriptor, TextureDimension, TextureFormat, TextureUsages, TextureView, TextureViewDescriptor};
+use wgpu::{
+    Device, Extent3d, FilterMode, ImageCopyTexture, ImageDataLayout, Origin3d, Queue, Sampler,
+    SamplerDescriptor, Texture, TextureAspect, TextureDescriptor, TextureDimension, TextureFormat,
+    TextureUsages, TextureView, TextureViewDescriptor,
+};
 use winit::dpi::PhysicalSize;
 
 pub struct Image {
     pub gpu_texture: Texture,
     pub view: TextureView,
     pub sampler: Sampler,
-    pub name: String
+    pub name: String,
 }
 
 impl Image {
@@ -24,7 +28,7 @@ impl Image {
                 depth_or_array_layers: 1, // 이미지의 레이어 갯수. 단순한 2차원 이미지니 1개로
             },
             mip_level_count: 1, // 거리에 따라 다른 텍스쳐 쓰기. 우린 그런거 없음.
-            sample_count: 1, // 안티 에일리징을 위한 멀티 샘플링. 우린 그런거 안씀
+            sample_count: 1,    // 안티 에일리징을 위한 멀티 샘플링. 우린 그런거 안씀
             dimension: TextureDimension::D2, // 2차원 텍스쳐
             format: TextureFormat::Rgba8UnormSrgb, // 이미지 포맷. 일단 rgba srgb 사용
 
@@ -68,17 +72,22 @@ impl Image {
                 origin: Origin3d::ZERO,
                 aspect: TextureAspect::All,
             },
-            &rgba,
+            rgba,
             ImageDataLayout {
                 offset: 0,
                 bytes_per_row: Some(4 * self.gpu_texture.width()),
-                rows_per_image: Some(self.gpu_texture.height())
+                rows_per_image: Some(self.gpu_texture.height()),
             },
-            self.gpu_texture.size()
+            self.gpu_texture.size(),
         )
     }
 
-    pub fn from_path<P: AsRef<Path>>(path: P, device: &Device, queue: &Queue, label: Option<&str>) -> Option<Self> {
+    pub fn from_path<P: AsRef<Path>>(
+        path: P,
+        device: &Device,
+        queue: &Queue,
+        label: Option<&str>,
+    ) -> Option<Self> {
         let format = match path.as_ref().extension() {
             None => None,
             Some(extension) => {
@@ -97,12 +106,14 @@ impl Image {
         let loaded = image::load(reader, format).ok()?;
 
         let mut to_return = Self::new(device, loaded.width(), loaded.height(), &label);
-        to_return.load_image(&queue, &loaded.into_rgba8());
+        to_return.load_image(queue, &loaded.into_rgba8());
         Some(to_return)
     }
 
     pub fn resize(&mut self, device: &Device, new_size: PhysicalSize<u32>) {
-        if self.gpu_texture.width() == new_size.width && self.gpu_texture.height() == new_size.height {
+        if self.gpu_texture.width() == new_size.width
+            && self.gpu_texture.height() == new_size.height
+        {
             return;
         }
 

@@ -23,8 +23,8 @@ use wasm_bindgen::prelude::*;
 use crate::app::Application;
 
 mod app;
-mod lantern;
 mod camera;
+mod lantern;
 mod util;
 
 // wasm 연결시 아래 함수를 시작점으로 삼도록 함.
@@ -53,11 +53,7 @@ pub async fn run() {
 
         let rgba = image.into_rgba8();
 
-        Icon::from_rgba(
-            rgba.into_vec(),
-            width,
-            height,
-        )
+        Icon::from_rgba(rgba.into_vec(), width, height)
     };
 
     let event_loop = EventLoop::new();
@@ -84,7 +80,6 @@ pub async fn run() {
             })
             .expect("Couldn't append canvas to document body.");
     }
-
 
     let mut app = Application::new(window, &event_loop).await;
     let mut last_frame_time = now();
@@ -113,7 +108,7 @@ pub async fn run() {
 
             app.update(frame_time);
             match app.render(frame_time) {
-                Ok(_) => {},
+                Ok(_) => {}
                 // 모종의 이유로 swap chain이 깨지면 surface를 재구성하기.
                 Err(SurfaceError::Lost) => app.resize(app.size),
                 // 메모리 부족시 그냥 -1로 튕기기
@@ -128,9 +123,7 @@ pub async fn run() {
         // window.request_redraw는 앱 시작시 원랜 한번만 실행됨
         // 그러나 우린 실시간 렌더링 앱을 만들기에 계속 다시 그려야함
         // 그래서 MainEvent가 다 비어서 이제 할꺼 없으면 바로 다시 그리도록 하기
-        Event::MainEventsCleared => {
-            app.window.request_redraw()
-        }
+        Event::MainEventsCleared => app.window.request_redraw(),
         _ => {}
     });
 }

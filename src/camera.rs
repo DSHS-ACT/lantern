@@ -1,6 +1,9 @@
+use std::mem::MaybeUninit;
 use std::ops::Add;
 
-use nalgebra::{Isometry3, Matrix4, Perspective3, Point3, Unit, UnitQuaternion, Vector2, Vector3, Vector4};
+use nalgebra::{
+    Isometry3, Matrix4, Perspective3, Point3, Unit, UnitQuaternion, Vector2, Vector3, Vector4,
+};
 use rayon::prelude::*;
 use winit::dpi::{PhysicalPosition, PhysicalSize};
 use winit::event::{ElementState, KeyboardInput, VirtualKeyCode, WindowEvent};
@@ -21,8 +24,9 @@ pub struct Camera {
 
     viewport_size: PhysicalSize<u32>,
 
-    inputs: [bool; 6], // WASD SPACE SHIFT
-    pub grab_mouse: bool
+    inputs: [bool; 6],
+    // WASD SPACE SHIFT
+    pub grab_mouse: bool,
 }
 
 impl Camera {
@@ -38,8 +42,7 @@ impl Camera {
         let position = Point3::from([0.0, 0.0, -1.0]);
         let forward = Vector3::z_axis();
         let target = position.add(&forward.into_inner());
-        let mut rays = Vec::with_capacity((viewport_size.width * viewport_size.height) as usize);
-        unsafe { rays.set_len(rays.capacity()) };
+        let rays = vec![];
         let view = Isometry3::look_at_lh(&position, &target, &Vector3::y_axis());
 
         let mut to_return = Self {
@@ -54,7 +57,7 @@ impl Camera {
             last_mouse: Default::default(),
             viewport_size,
             inputs: [false; 6],
-            grab_mouse: false
+            grab_mouse: false,
         };
 
         to_return.reevaluate_rays();
@@ -89,11 +92,12 @@ impl Camera {
                 true
             }
             WindowEvent::KeyboardInput {
-                input: KeyboardInput {
-                    state,
-                    virtual_keycode: Some(key),
-                    ..
-                },
+                input:
+                    KeyboardInput {
+                        state,
+                        virtual_keycode: Some(key),
+                        ..
+                    },
                 ..
             } => {
                 let is_press = matches!(state, ElementState::Pressed);
@@ -108,7 +112,7 @@ impl Camera {
                         self.grab_mouse = !self.grab_mouse;
                     }
                     _ => {
-                        return false
+                        return false;
                     }
                 };
 
@@ -188,33 +192,49 @@ impl Camera {
     }
 
     fn reevaluate_rays(&mut self) {
-        self.rays.clear();
-        unsafe { self.rays.set_len((self.viewport_size.width * self.viewport_size.height) as usize); }
+        self.rays =
+            Vec::with_capacity((self.viewport_size.width * self.viewport_size.height) as usize);
+        let writer = self.rays.spare_capacity_mut();
 
-        self.rays.par_iter_mut().enumerate().for_each(|(index ,ray_direction)| {
-            let y = index as u32 / self.viewport_size.width;
-            let x = index as u32 % self.viewport_size.width;
+        writer
+            .par_iter_mut()
+            .enumerate()
+            .for_each(|(index, ray_direction)| {
+                let y = index as u32 / self.viewport_size.width;
+                let x = index as u32 % self.viewport_size.width;
 
-            let mut coord = Vector2::new(
-                x as f32 / self.viewport_size.width as f32,
-                y as f32 / self.viewport_size.height as f32,
-            );
-            coord *= 2.0;
-            coord -= Vector2::new(1.0, 1.0);
+                let mut coord = Vector2::new(
+                    x as f32 / self.viewport_size.width as f32,
+                    y as f32 / self.viewport_size.height as f32,
+                );
+                coord *= 2.0;
+                coord -= Vector2::new(1.0, 1.0);
 
-            let target = self.projection.inverse() * Vector4::new(coord.x, coord.y, 1.0,1.0);
-            // Frustum is right handed, z is inverted
+                let target = self.projection.inverse() * Vector4::new(coord.x, coord.y, 1.0, 1.0);
+                // Frustum is right handed, z is inverted
 
-            //let normalized = (target.xyz() / target.w).normalize();
-            let mut normalized = target.xyz().normalize();
+                //let normalized = (target.xyz() / target.w).normalize();
+                let mut normalized = target.xyz().normalize();
 
-            if target.w.is_sign_negative() {
-                normalized = -normalized;
-            }
+                if target.w.is_sign_negative() {
+                    normalized = -normalized;
+                }
 
-            *ray_direction = Unit::new_unchecked(self.view.inverse_transform_vector(&normalized));
+                let new_direction =
+                    Unit::new_unchecked(self.view.inverse_transform_vector(&normalized));
 
-            assert!(0.9 <= ray_direction.magnitude_squared() && ray_direction.magnitude_squared() <= 1.1);
-        });
+                assert!(
+                    0.9 <= new_direction.magnitude_squared()
+                        && new_direction.magnitude_squared() <= 1.1
+                );
+                *ray_direction = MaybeUninit::new(Unit::new_unchecked(
+                    self.view.inverse_transform_vector(&normalized),
+                ));
+            });
+
+        unsafe {
+            self.rays
+                .set_len((self.viewport_size.width * self.viewport_size.height) as usize);
+        }
     }
 }

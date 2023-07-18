@@ -2,7 +2,7 @@ use nalgebra::Vector3;
 
 pub struct Scene {
     pub spheres: Vec<Sphere>,
-    pub materials: Vec<Material>
+    pub materials: Vec<Material>,
 }
 
 pub struct Material {

@@ -13,9 +13,9 @@ use crate::lantern::texture::Image;
 use crate::util::random_vec;
 use crate::vec4_to_rgba;
 
-mod texture;
 mod ray;
 pub mod scene;
+mod texture;
 
 pub struct Settings {
     pub should_accumulate: bool,
@@ -39,9 +39,15 @@ pub struct Lantern {
 
 impl Lantern {
     pub fn new(device: &Device, viewport_size: PhysicalSize<u32>) -> Self {
-        let final_image = Image::new(device, viewport_size.width, viewport_size.height, "Lantern Output");
+        let final_image = Image::new(
+            device,
+            viewport_size.width,
+            viewport_size.height,
+            "Lantern Output",
+        );
         let final_image_data = vec![0; (viewport_size.width * viewport_size.height) as usize];
-        let path_acc = vec![Vector4::zeros(); (viewport_size.width * viewport_size.height) as usize];
+        let path_acc =
+            vec![Vector4::zeros(); (viewport_size.width * viewport_size.height) as usize];
 
         Self {
             final_image,
@@ -70,19 +76,24 @@ impl Lantern {
             }
         }
 
-        self.path_acc.par_iter_mut().zip(self.final_image_data.par_iter_mut()).enumerate().for_each(|(index, (path, data))| {
-            let color = Self::per_pixel(scene, camera, index);
+        self.path_acc
+            .par_iter_mut()
+            .zip(self.final_image_data.par_iter_mut())
+            .enumerate()
+            .for_each(|(index, (path, data))| {
+                let color = Self::per_pixel(scene, camera, index);
 
-            *path += color;
+                *path += color;
 
-            let accumulated = *path / (self.acc_counter as f32);
+                let accumulated = *path / (self.acc_counter as f32);
 
-            *data = vec4_to_rgba(
-                &(accumulated / accumulated.max()) // Alpha가 언제나 1이니까 괜찮지 않을까?
-            );
-        });
+                *data = vec4_to_rgba(
+                    &(accumulated / accumulated.max()), // Alpha가 언제나 1이니까 괜찮지 않을까?
+                );
+            });
 
-        self.final_image.load_image(queue, cast_slice(&self.final_image_data));
+        self.final_image
+            .load_image(queue, cast_slice(&self.final_image_data));
 
         if self.settings.should_accumulate {
             self.acc_counter += 1;
@@ -98,7 +109,7 @@ impl Lantern {
     const BOUNCE_LIMIT: usize = 2;
 
     // DirectX의 RayGen 쉐이더와 같음
-    pub fn per_pixel(scene: &Scene, camera: &Camera, index: usize) -> Vector4::<f32> {
+    pub fn per_pixel(scene: &Scene, camera: &Camera, index: usize) -> Vector4<f32> {
         let origin = camera.position;
         let mut ray = Ray {
             origin,
@@ -193,9 +204,7 @@ impl Lantern {
             }
         }
 
-        closest.map(move |(sphere, distance)| {
-            Self::closest_hit(ray, distance, sphere)
-        })
+        closest.map(move |(sphere, distance)| Self::closest_hit(ray, distance, sphere))
     }
 }
 
@@ -207,4 +216,3 @@ pub struct HitPayload<'a> {
     normal: Unit<Vector3<f32>>,
     sphere: &'a Sphere,
 }
-
